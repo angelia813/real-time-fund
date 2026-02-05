@@ -419,7 +419,7 @@ input[type="number"] {
 
 .table-row {
   display: grid;
-  grid-template-columns: 2fr 1fr 1fr 1fr 1.2fr 60px;
+  grid-template-columns: 2fr 1fr 1fr 1fr 1.2fr 1.2fr 1.2fr 60px;
   align-items: center;
   gap: 12px;
   padding: 12px 24px !important;
@@ -437,7 +437,7 @@ input[type="number"] {
 
 .table-header-row {
   display: grid;
-  grid-template-columns: 2fr 1fr 1fr 1fr 1.2fr 60px;
+  grid-template-columns: 2fr 1fr 1fr 1fr 1.2fr 1.2fr 1.2fr 60px;
   gap: 12px;
   padding: 16px 24px;
   background: rgba(255, 255, 255, 0.05);
@@ -518,6 +518,8 @@ input[type="number"] {
     justify-content: flex-end;
   }
   .action-cell { display: none; }
+  .holding-cell { display: none; }
+  .holding-amount-cell { display: none; }
   .table-cell.time-cell span {
     font-size: 10px !important;
   }

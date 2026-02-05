@@ -3162,7 +3162,9 @@ export default function HomePage() {
                       <div className="table-header-cell text-right">净值/估值</div>
                       <div className="table-header-cell text-right">涨跌幅</div>
                       <div className="table-header-cell text-right">更新时间</div>
+                      <div className="table-header-cell text-right">持仓金额</div>
                       <div className="table-header-cell text-right">当日盈亏</div>
+                      <div className="table-header-cell text-right">持有收益</div>
                       <div className="table-header-cell text-center">操作</div>
                     </div>
                   )}
@@ -3312,6 +3314,41 @@ export default function HomePage() {
                             <div className="table-cell text-right time-cell">
                               <span className="muted" style={{ fontSize: '12px' }}>{f.gztime || f.time || '-'}</span>
                             </div>
+                            {!isMobile && (() => {
+                              const holding = holdings[f.code];
+                              const profit = getHoldingProfit(f, holding);
+                              const amount = profit ? profit.amount : null;
+                              if (amount === null) {
+                                return (
+                                  <div 
+                                    className="table-cell text-right holding-amount-cell"
+                                    title="设置持仓"
+                                    onClick={(e) => { e.stopPropagation(); setHoldingModal({ open: true, fund: f }); }}
+                                  >
+                                    <span className="muted" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: '12px', cursor: 'pointer' }}>
+                                      未设置 <SettingsIcon width="12" height="12" />
+                                    </span>
+                                  </div>
+                                );
+                              }
+                              return (
+                                <div 
+                                  className="table-cell text-right holding-amount-cell"
+                                  title="点击设置持仓"
+                                  onClick={(e) => { e.stopPropagation(); setActionModal({ open: true, fund: f }); }}
+                                >
+                                  <span style={{ fontWeight: 700, marginRight: 6 }}>¥{amount.toFixed(2)}</span>
+                                  <button
+                                    className="icon-button"
+                                    onClick={(e) => { e.stopPropagation(); setActionModal({ open: true, fund: f }); }}
+                                    title="编辑持仓"
+                                    style={{ border: 'none', width: '28px', height: '28px', marginLeft: -6 }}
+                                  >
+                                    <SettingsIcon width="14" height="14" />
+                                  </button>
+                                </div>
+                              );
+                            })()}
                             {(() => {
                               const holding = holdings[f.code];
                               const profit = getHoldingProfit(f, holding);
@@ -3328,6 +3365,35 @@ export default function HomePage() {
                                       ? `${profitValue > 0 ? '+' : profitValue < 0 ? '-' : ''}¥${Math.abs(profitValue).toFixed(2)}`
                                       : ''}
                                   </span>
+                                </div>
+                              );
+                            })()}
+                            {!isMobile && (() => {
+                              const holding = holdings[f.code];
+                              const profit = getHoldingProfit(f, holding);
+                              const total = profit ? profit.profitTotal : null;
+                              const principal = holding && holding.cost && holding.share ? holding.cost * holding.share : 0;
+                              const asPercent = percentModes[f.code];
+                              const hasTotal = total !== null;
+                              const formatted = hasTotal 
+                                ? (asPercent && principal > 0 
+                                  ? `${total > 0 ? '+' : total < 0 ? '-' : ''}${Math.abs((total / principal) * 100).toFixed(2)}%`
+                                  : `${total > 0 ? '+' : total < 0 ? '-' : ''}¥${Math.abs(total).toFixed(2)}`)
+                                : '';
+                              const cls = hasTotal ? (total > 0 ? 'up' : total < 0 ? 'down' : '') : 'muted';
+                              return (
+                                <div 
+                                  className="table-cell text-right holding-cell" 
+                                  title="点击切换金额/百分比"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (hasTotal) {
+                                      setPercentModes(prev => ({ ...prev, [f.code]: !prev[f.code] }));
+                                    }
+                                  }}
+                                  style={{ cursor: hasTotal ? 'pointer' : 'default' }}
+                                >
+                                  <span className={cls} style={{ fontWeight: 700 }}>{formatted}</span>
                                 </div>
                               );
                             })()}
