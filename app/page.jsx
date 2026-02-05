@@ -3070,26 +3070,11 @@ export default function HomePage() {
                                 </button>
                               )}
                               <div className="title-text">
-                            <span className="name-text" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span 
+                              className={`name-text ${f.jzrq === todayStr ? 'updated' : ''}`}
+                              title={f.jzrq === todayStr ? "今日净值已更新" : ""}
+                            >
                               {f.name}
-                              {f.jzrq === todayStr && (
-                                <span 
-                                  title="今日净值已更新" 
-                                  style={{ 
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    width: 16, 
-                                    height: 16, 
-                                    borderRadius: '50%', 
-                                    background: 'rgba(34, 197, 94, 0.2)', 
-                                    color: '#22c55e',
-                                    fontSize: '10px'
-                                  }}
-                                >
-                                  ✓
-                                </span>
-                              )}
                             </span>
                                 <span className="muted code-text">#{f.code}</span>
                               </div>
@@ -3191,28 +3176,11 @@ export default function HomePage() {
                                 </button>
                               )}
                               <div className="title-text">
-                                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <span 
+                                  className={`name-text ${f.jzrq === todayStr ? 'updated' : ''}`}
+                                  title={f.jzrq === todayStr ? "今日净值已更新" : ""}
+                                >
                                   {f.name}
-                                  {console.log('jzrq', f.jzrq)}
-                                  {console.log('todayStr', todayStr)}
-                                  {f.jzrq === todayStr && (
-                                    <span 
-                                      title="今日净值已更新" 
-                                      style={{ 
-                                        display: 'inline-flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'center',
-                                        width: 16, 
-                                        height: 16, 
-                                        borderRadius: '50%', 
-                                        background: 'rgba(34, 197, 94, 0.2)', 
-                                        color: '#22c55e',
-                                        fontSize: '10px'
-                                      }}
-                                    >
-                                      ✓
-                                    </span>
-                                  )}
                                 </span>
                                 <span className="muted">#{f.code}</span>
                               </div>
