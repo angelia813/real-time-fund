@@ -1,33 +1,77 @@
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
+import { cachedRequest, clearCachedRequest } from '../lib/cacheRequest';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
-dayjs.tz.setDefault('Asia/Shanghai');
 
-const TZ = 'Asia/Shanghai';
+const DEFAULT_TZ = 'Asia/Shanghai';
+const getBrowserTimeZone = () => {
+  if (typeof Intl !== 'undefined' && Intl.DateTimeFormat) {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return tz || DEFAULT_TZ;
+  }
+  return DEFAULT_TZ;
+};
+const TZ = getBrowserTimeZone();
+dayjs.tz.setDefault(TZ);
 const nowInTz = () => dayjs().tz(TZ);
 const toTz = (input) => (input ? dayjs.tz(input, TZ) : nowInTz());
 
 export const loadScript = (url) => {
-  return new Promise((resolve, reject) => {
-    if (typeof document === 'undefined' || !document.body) return resolve();
-    const script = document.createElement('script');
-    script.src = url;
-    script.async = true;
-    const cleanup = () => {
-      if (document.body.contains(script)) document.body.removeChild(script);
-    };
-    script.onload = () => {
-      cleanup();
-      resolve();
-    };
-    script.onerror = () => {
-      cleanup();
-      reject(new Error('数据加载失败'));
-    };
-    document.body.appendChild(script);
+  if (typeof document === 'undefined' || !document.body) return Promise.resolve();
+
+  let cacheKey = url;
+  try {
+    const parsed = new URL(url);
+    parsed.searchParams.delete('_');
+    parsed.searchParams.delete('_t');
+    cacheKey = parsed.toString();
+  } catch (e) {
+  }
+
+  const cacheTime = 10 * 60 * 1000;
+
+  return cachedRequest(
+    () =>
+      new Promise((resolve) => {
+        const script = document.createElement('script');
+        script.src = url;
+        script.async = true;
+
+        const cleanup = () => {
+          if (document.body.contains(script)) document.body.removeChild(script);
+        };
+
+        script.onload = () => {
+          cleanup();
+          let apidata;
+          try {
+            apidata = window?.apidata ? JSON.parse(JSON.stringify(window.apidata)) : undefined;
+          } catch (e) {
+            apidata = window?.apidata;
+          }
+          resolve({ ok: true, apidata });
+        };
+
+        script.onerror = () => {
+          cleanup();
+          resolve({ ok: false, error: '数据加载失败' });
+        };
+
+        document.body.appendChild(script);
+      }),
+    cacheKey,
+    { cacheTime }
+  ).then((result) => {
+    if (!result?.ok) {
+      clearCachedRequest(cacheKey);
+      throw new Error(result?.error || '数据加载失败');
+    }
+    if (typeof window !== 'undefined' && result.apidata !== undefined) {
+      window.apidata = result.apidata;
+    }
   });
 };
 
@@ -388,7 +432,10 @@ export const fetchShanghaiIndexDate = async () => {
 };
 
 export const fetchLatestRelease = async () => {
-  const res = await fetch('https://api.github.com/repos/hzm0321/real-time-fund/releases/latest');
+  const url = process.env.NEXT_PUBLIC_GITHUB_LATEST_RELEASE_URL;
+  if (!url) return null;
+
+  const res = await fetch(url);
   if (!res.ok) return null;
   const data = await res.json();
   return {
@@ -403,4 +450,155 @@ export const submitFeedback = async (formData) => {
     body: formData
   });
   return response.json();
+};
+
+// 使用智谱 GLM 从 OCR 文本中抽取基金名称
+export const extractFundNamesWithLLM = async (ocrText) => {
+  const apiKey = '8df8ccf74a174722847c83b7e222f2af.4A39rJvUeBVDmef1';
+  if (!apiKey || !ocrText) return [];
+
+  try {
+    const models = ['glm-4.5-flash', 'glm-4.7-flash'];
+    const model = models[Math.floor(Math.random() * models.length)];
+
+    const resp = await fetch('https://open.bigmodel.cn/api/paas/v4/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          {
+            role: 'user',
+            content:
+              '你是一个基金 OCR 文本解析助手。' +
+              '从下面的 OCR 文本中抽取其中出现的「基金名称列表」。' +
+              '要求：1）基金名称一般为中文，中间不能有空字符串,可包含部分英文或括号' +
+              '2）名称后面通常会跟着金额或持有金额（数字，可能带千分位逗号和小数）；' +
+              '3）忽略无关信息，只返回你判断为基金名称的字符串；' +
+              '4）去重后输出。输出格式：严格返回 JSON，如 {"fund_names": ["基金名称1","基金名称2"]}，不要输出任何多余说明',
+          },
+          {
+            role: 'user',
+            content: String(ocrText),
+          },
+        ],
+        temperature: 0.2,
+        max_tokens: 1024,
+        thinking: {
+          type: 'disabled',
+        },
+      }),
+    });
+
+    if (!resp.ok) {
+      return [];
+    }
+
+    const data = await resp.json();
+    let content = data?.choices?.[0]?.message?.content?.match(/\{[\s\S]*?\}/)?.[0];
+    if (!content || typeof content !== 'string') return [];
+
+    let parsed;
+    try {
+      parsed = JSON.parse(content);
+    } catch {
+      return [];
+    }
+
+    const names = parsed?.fund_names;
+    if (!Array.isArray(names)) return [];
+    return names
+      .map((n) => (typeof n === 'string' ? n.trim().replaceAll(' ','') : ''))
+      .filter(Boolean);
+  } catch (e) {
+    return [];
+  }
+};
+
+let historyQueue = Promise.resolve();
+
+export const fetchFundHistory = async (code, range = '1m') => {
+  if (typeof window === 'undefined') return [];
+
+  const end = nowInTz();
+  let start = end.clone();
+
+  switch (range) {
+    case '1m': start = start.subtract(1, 'month'); break;
+    case '3m': start = start.subtract(3, 'month'); break;
+    case '6m': start = start.subtract(6, 'month'); break;
+    case '1y': start = start.subtract(1, 'year'); break;
+    case '3y': start = start.subtract(3, 'year'); break;
+    default: start = start.subtract(1, 'month');
+  }
+
+  const sdate = start.format('YYYY-MM-DD');
+  const edate = end.format('YYYY-MM-DD');
+  const per = 49;
+
+  return new Promise((resolve) => {
+    historyQueue = historyQueue.then(async () => {
+      let allData = [];
+      let page = 1;
+      let totalPages = 1;
+
+      try {
+        const parseContent = (content) => {
+            if (!content) return [];
+            const rows = content.split('<tr>');
+            const data = [];
+            for (const row of rows) {
+                const cells = row.match(/<td[^>]*>(.*?)<\/td>/g);
+                if (cells && cells.length >= 2) {
+                    const dateStr = cells[0].replace(/<[^>]+>/g, '').trim();
+                    const valStr = cells[1].replace(/<[^>]+>/g, '').trim();
+                    const val = parseFloat(valStr);
+                    if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr) && !isNaN(val)) {
+                        data.push({ date: dateStr, value: val });
+                    }
+                }
+            }
+            return data;
+        };
+
+        // Fetch first page to get metadata
+        const firstUrl = `https://fundf10.eastmoney.com/F10DataApi.aspx?type=lsjz&code=${code}&page=${page}&per=${per}&sdate=${sdate}&edate=${edate}`;
+        await loadScript(firstUrl);
+
+        if (!window.apidata || !window.apidata.content || window.apidata.content.includes('暂无数据')) {
+          resolve([]);
+          return;
+        }
+
+        // Parse total pages
+        if (window.apidata.pages) {
+            totalPages = parseInt(window.apidata.pages, 10) || 1;
+        }
+
+        allData = allData.concat(parseContent(window.apidata.content));
+
+        // Fetch remaining pages
+        for (page = 2; page <= totalPages; page++) {
+             const nextUrl = `https://fundf10.eastmoney.com/F10DataApi.aspx?type=lsjz&code=${code}&page=${page}&per=${per}&sdate=${sdate}&edate=${edate}`;
+             await loadScript(nextUrl);
+             if (window.apidata && window.apidata.content) {
+                 allData = allData.concat(parseContent(window.apidata.content));
+             }
+        }
+
+        // The data comes in reverse chronological order (newest first), so we need to reverse it for the chart (oldest first)
+        resolve(allData.reverse());
+
+      } catch (e) {
+        console.error('Fetch history error:', e);
+        resolve([]);
+      }
+    }).catch((e) => {
+       console.error('Queue error:', e);
+       resolve([]);
+    });
+  });
 };

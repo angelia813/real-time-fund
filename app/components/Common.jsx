@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import Image from 'next/image';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
@@ -11,9 +12,17 @@ import { CalendarIcon, MinusIcon, PlusIcon } from './Icons';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
-dayjs.tz.setDefault('Asia/Shanghai');
 
-const TZ = 'Asia/Shanghai';
+const DEFAULT_TZ = 'Asia/Shanghai';
+const getBrowserTimeZone = () => {
+  if (typeof Intl !== 'undefined' && Intl.DateTimeFormat) {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return tz || DEFAULT_TZ;
+  }
+  return DEFAULT_TZ;
+};
+const TZ = getBrowserTimeZone();
+dayjs.tz.setDefault(TZ);
 const nowInTz = () => dayjs().tz(TZ);
 const toTz = (input) => (input ? dayjs.tz(input, TZ) : nowInTz());
 const formatDate = (input) => toTz(input).format('YYYY-MM-DD');
@@ -219,19 +228,25 @@ export function DonateTabs() {
           justifyContent: 'center'
         }}
       >
-        {method === 'alipay' ? (
-          <img
-            src={zhifubaoImg.src}
-            alt="支付宝收款码"
-            style={{ width: '100%', height: '100%', objectFit: 'contain' }}
-          />
-        ) : (
-          <img
-            src={weixinImg.src}
-            alt="微信收款码"
-            style={{ width: '100%', height: '100%', objectFit: 'contain' }}
-          />
-        )}
+        <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+          {method === 'alipay' ? (
+            <Image
+              src={zhifubaoImg}
+              alt="支付宝收款码"
+              fill
+              sizes="184px"
+              style={{ objectFit: 'contain' }}
+            />
+          ) : (
+            <Image
+              src={weixinImg}
+              alt="微信收款码"
+              fill
+              sizes="184px"
+              style={{ objectFit: 'contain' }}
+            />
+          )}
+        </div>
       </div>
     </div>
   );
@@ -256,6 +271,7 @@ export function NumericInput({ value, onChange, step = 1, min = 0, placeholder }
     <div style={{ position: 'relative' }}>
       <input
         type="number"
+        inputMode="decimal"
         step="any"
         className="input no-zoom"
         value={value}
