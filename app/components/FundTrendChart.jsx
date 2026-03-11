@@ -29,13 +29,40 @@ ChartJS.register(
   Filler
 );
 
-export default function FundTrendChart({ code, isExpanded, onToggleExpand, transactions = [] }) {
+const CHART_COLORS = {
+  dark: {
+    danger: '#f87171',
+    success: '#34d399',
+    primary: '#22d3ee',
+    muted: '#9ca3af',
+    border: '#1f2937',
+    text: '#e5e7eb',
+    crosshairText: '#0f172a',
+  },
+  light: {
+    danger: '#dc2626',
+    success: '#059669',
+    primary: '#0891b2',
+    muted: '#475569',
+    border: '#e2e8f0',
+    text: '#0f172a',
+    crosshairText: '#ffffff',
+  }
+};
+
+function getChartThemeColors(theme) {
+  return CHART_COLORS[theme] || CHART_COLORS.dark;
+}
+
+export default function FundTrendChart({ code, isExpanded, onToggleExpand, transactions = [], theme = 'dark', hideHeader = false }) {
   const [range, setRange] = useState('1m');
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const chartRef = useRef(null);
   const hoverTimeoutRef = useRef(null);
+
+  const chartColors = useMemo(() => getChartThemeColors(theme), [theme]);
 
   useEffect(() => {
     // If collapsed, don't fetch data unless we have no data yet
@@ -74,7 +101,8 @@ export default function FundTrendChart({ code, isExpanded, onToggleExpand, trans
     { label: '近3月', value: '3m' },
     { label: '近6月', value: '6m' },
     { label: '近1年', value: '1y' },
-    { label: '近3年', value: '3y'}
+    { label: '近3年', value: '3y' },
+    { label: '成立来', value: 'all' }
   ];
 
   const change = useMemo(() => {
@@ -84,12 +112,11 @@ export default function FundTrendChart({ code, isExpanded, onToggleExpand, trans
      return ((last - first) / first) * 100;
   }, [data]);
 
-  // Red for up, Green for down (CN market style)
-  // Hardcoded hex values from globals.css for Chart.js
-  const upColor = '#f87171'; // --danger，与折线图红色一致
-  const downColor = '#34d399'; // --success
+  // Red for up, Green for down (CN market style)，随主题使用 CSS 变量
+  const upColor = chartColors.danger;
+  const downColor = chartColors.success;
   const lineColor = change >= 0 ? upColor : downColor;
-  const primaryColor = typeof document !== 'undefined' ? (getComputedStyle(document.documentElement).getPropertyValue('--primary').trim() || '#22d3ee') : '#22d3ee';
+  const primaryColor = chartColors.primary;
 
   const chartData = useMemo(() => {
     // Calculate percentage change based on the first data point
@@ -165,9 +192,10 @@ export default function FundTrendChart({ code, isExpanded, onToggleExpand, trans
         }
       ]
     };
-  }, [data, lineColor, transactions, primaryColor]);
+  }, [data, transactions, lineColor, primaryColor, upColor]);
 
   const options = useMemo(() => {
+    const colors = getChartThemeColors(theme);
     return {
       responsive: true,
       maintainAspectRatio: false,
@@ -190,7 +218,7 @@ export default function FundTrendChart({ code, isExpanded, onToggleExpand, trans
             drawBorder: false
           },
           ticks: {
-            color: '#9ca3af',
+            color: colors.muted,
             font: { size: 10 },
             maxTicksLimit: 4,
             maxRotation: 0
@@ -201,12 +229,12 @@ export default function FundTrendChart({ code, isExpanded, onToggleExpand, trans
           display: true,
           position: 'left',
           grid: {
-            color: '#1f2937',
+            color: colors.border,
             drawBorder: false,
             tickLength: 0
           },
           ticks: {
-            color: '#9ca3af',
+            color: colors.muted,
             font: { size: 10 },
             count: 5,
             callback: (value) => `${value.toFixed(2)}%`
@@ -240,7 +268,7 @@ export default function FundTrendChart({ code, isExpanded, onToggleExpand, trans
       },
       onClick: () => {}
     };
-  }, []);
+  }, [theme]);
 
   useEffect(() => {
     return () => {
@@ -250,7 +278,9 @@ export default function FundTrendChart({ code, isExpanded, onToggleExpand, trans
     };
   }, []);
 
-  const plugins = useMemo(() => [{
+  const plugins = useMemo(() => {
+    const colors = getChartThemeColors(theme);
+    return [{
     id: 'crosshair',
     afterEvent: (chart, args) => {
       const { event, replay } = args || {};
@@ -276,7 +306,7 @@ export default function FundTrendChart({ code, isExpanded, onToggleExpand, trans
     afterDraw: (chart) => {
       const ctx = chart.ctx;
       const datasets = chart.data.datasets;
-      const primaryColor = getComputedStyle(document.documentElement).getPropertyValue('--primary').trim() || '#22d3ee';
+      const primaryColor = colors.primary;
 
       // 绘制圆角矩形（兼容无 roundRect 的环境）
       const drawRoundRect = (left, top, w, h, r) => {
@@ -377,7 +407,7 @@ export default function FundTrendChart({ code, isExpanded, onToggleExpand, trans
         ctx.beginPath();
         ctx.setLineDash([3, 3]);
         ctx.lineWidth = 1;
-        ctx.strokeStyle = '#9ca3af';
+        ctx.strokeStyle = colors.muted;
 
         // Draw vertical line
         ctx.moveTo(x, topY);
@@ -415,7 +445,7 @@ export default function FundTrendChart({ code, isExpanded, onToggleExpand, trans
                const labelCenterX = labelLeft + textWidth / 2;
                ctx.fillStyle = primaryColor;
                ctx.fillRect(labelLeft, bottomY, textWidth, 16);
-               ctx.fillStyle = '#0f172a'; // --background
+               ctx.fillStyle = colors.crosshairText;
                ctx.fillText(dateStr, labelCenterX, bottomY + 8);
 
                // Y axis label (value)
@@ -423,7 +453,7 @@ export default function FundTrendChart({ code, isExpanded, onToggleExpand, trans
                const valWidth = ctx.measureText(valueStr).width + 8;
                ctx.fillStyle = primaryColor;
                ctx.fillRect(leftX, y - 8, valWidth, 16);
-               ctx.fillStyle = '#0f172a'; // --background
+               ctx.fillStyle = colors.crosshairText;
                ctx.textAlign = 'center';
                ctx.fillText(valueStr, leftX + valWidth / 2, y);
            }
@@ -442,7 +472,7 @@ export default function FundTrendChart({ code, isExpanded, onToggleExpand, trans
                 const label = datasets[dsIndex].label;
                 // Determine background color based on dataset index
                 // 1 = Buy (主题色), 2 = Sell (与折线图红色一致)
-                const bgColor = dsIndex === 1 ? primaryColor : '#f87171';
+                const bgColor = dsIndex === 1 ? primaryColor : colors.danger;
 
                 // If collision, offset Buy label upwards
                 let yOffset = 0;
@@ -457,97 +487,105 @@ export default function FundTrendChart({ code, isExpanded, onToggleExpand, trans
         ctx.restore();
       }
     }
-  }], []); // 移除 data 依赖，因为我们直接从 chart 实例读取数据
+  }];
+  }, [theme]); // theme 变化时重算以应用亮色/暗色坐标轴与 crosshair
 
-  return (
-    <div style={{ marginTop: 16 }} onClick={(e) => e.stopPropagation()}>
-      <div
-        style={{ marginBottom: 8, cursor: 'pointer', userSelect: 'none' }}
-        className="title"
-        onClick={onToggleExpand}
-      >
-        <div className="row" style={{ width: '100%', flex: 1 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span>业绩走势</span>
-            <ChevronIcon
-              width="16"
-              height="16"
-              className="muted"
-              style={{
-                transform: !isExpanded ? 'rotate(-90deg)' : 'rotate(0deg)',
-                transition: 'transform 0.2s ease'
-              }}
-            />
+  const chartBlock = (
+    <>
+      <div style={{ position: 'relative', height: 180, width: '100%', touchAction: 'pan-y' }}>
+        {loading && (
+          <div className="chart-overlay" style={{ backdropFilter: 'blur(2px)' }}>
+            <span className="muted" style={{ fontSize: '12px' }}>加载中...</span>
           </div>
-          {data.length > 0 && (
-             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-               <span className="muted">{ranges.find(r => r.value === range)?.label}涨跌幅</span>
-               <span style={{ color: lineColor, fontWeight: 600 }}>
-                 {change > 0 ? '+' : ''}{change.toFixed(2)}%
-               </span>
-             </div>
-          )}
-        </div>
+        )}
+
+        {!loading && data.length === 0 && (
+          <div className="chart-overlay">
+            <span className="muted" style={{ fontSize: '12px' }}>暂无数据</span>
+          </div>
+        )}
+
+        {data.length > 0 && (
+          <Line ref={chartRef} data={chartData} options={options} plugins={plugins} />
+        )}
       </div>
 
-      <AnimatePresence>
-        {isExpanded && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.3, ease: 'easeInOut' }}
-            style={{ overflow: 'hidden' }}
+      <div className="trend-range-bar">
+        {ranges.map(r => (
+          <button
+            key={r.value}
+            type="button"
+            className={`trend-range-btn ${range === r.value ? 'active' : ''}`}
+            onClick={(e) => { e.stopPropagation(); setRange(r.value); }}
           >
-            <div style={{ position: 'relative', height: 180, width: '100%' }}>
-              {loading && (
-                <div style={{
-                  position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  background: 'rgba(255,255,255,0.02)', zIndex: 10, backdropFilter: 'blur(2px)'
-                }}>
-                  <span className="muted" style={{ fontSize: '12px' }}>加载中...</span>
-                </div>
-              )}
+            {r.label}
+          </button>
+        ))}
+      </div>
+    </>
+  );
 
-              {!loading && data.length === 0 && (
-                 <div style={{
-                  position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  background: 'rgba(255,255,255,0.02)', zIndex: 10
-                }}>
-                  <span className="muted" style={{ fontSize: '12px' }}>暂无数据</span>
-                </div>
-              )}
-
-              {data.length > 0 && (
-                <Line ref={chartRef} data={chartData} options={options} plugins={plugins} />
-              )}
+  return (
+    <div style={{ marginTop: hideHeader ? 0 : 16 }} onClick={(e) => e.stopPropagation()}>
+      {!hideHeader && (
+        <div
+          style={{ marginBottom: 8, cursor: 'pointer', userSelect: 'none' }}
+          className="title"
+          onClick={onToggleExpand}
+        >
+          <div className="row" style={{ width: '100%', flex: 1 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span>业绩走势</span>
+              <ChevronIcon
+                width="16"
+                height="16"
+                className="muted"
+                style={{
+                  transform: !isExpanded ? 'rotate(-90deg)' : 'rotate(0deg)',
+                  transition: 'transform 0.2s ease'
+                }}
+              />
             </div>
+            {data.length > 0 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span className="muted">{ranges.find(r => r.value === range)?.label}涨跌幅</span>
+                <span style={{ color: lineColor, fontWeight: 600 }}>
+                  {change > 0 ? '+' : ''}{change.toFixed(2)}%
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
-            <div style={{ display: 'flex', gap: 4, marginTop: 12, justifyContent: 'space-between', background: 'rgba(0,0,0,0.2)', padding: 4, borderRadius: 8 }}>
-              {ranges.map(r => (
-                <button
-                  key={r.value}
-                  onClick={(e) => { e.stopPropagation(); setRange(r.value); }}
-                  style={{
-                    flex: 1,
-                    padding: '6px 0',
-                    fontSize: '11px',
-                    borderRadius: '6px',
-                    border: 'none',
-                    background: range === r.value ? 'rgba(255,255,255,0.1)' : 'transparent',
-                    color: range === r.value ? 'var(--primary)' : 'var(--muted)',
-                    cursor: 'pointer',
-                    transition: 'all 0.2s',
-                    fontWeight: range === r.value ? 600 : 400
-                  }}
-                >
-                  {r.label}
-                </button>
-              ))}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {hideHeader && data.length > 0 && (
+        <div className="row" style={{ marginBottom: 8, justifyContent: 'flex-end' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span className="muted">{ranges.find(r => r.value === range)?.label}涨跌幅</span>
+            <span style={{ color: lineColor, fontWeight: 600 }}>
+              {change > 0 ? '+' : ''}{change.toFixed(2)}%
+            </span>
+          </div>
+        </div>
+      )}
+
+      {hideHeader ? (
+        chartBlock
+      ) : (
+        <AnimatePresence>
+          {isExpanded && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.3, ease: 'easeInOut' }}
+              style={{ overflow: 'hidden' }}
+            >
+              {chartBlock}
+            </motion.div>
+          )}
+        </AnimatePresence>
+      )}
     </div>
   );
 }

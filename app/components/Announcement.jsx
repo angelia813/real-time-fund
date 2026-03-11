@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-const ANNOUNCEMENT_KEY = 'hasClosedAnnouncement_v10';
+const ANNOUNCEMENT_KEY = 'hasClosedAnnouncement_v15';
 
 export default function Announcement() {
   const [isVisible, setIsVisible] = useState(false);
@@ -16,6 +16,16 @@ export default function Announcement() {
   }, []);
 
   const handleClose = () => {
+    // 清理历史 ANNOUNCEMENT_KEY
+    const keysToRemove = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith('hasClosedAnnouncement_v') && key !== ANNOUNCEMENT_KEY) {
+        keysToRemove.push(key);
+      }
+    }
+    keysToRemove.forEach((k) => localStorage.removeItem(k));
+
     localStorage.setItem(ANNOUNCEMENT_KEY, 'true');
     setIsVisible(false);
   };
@@ -52,6 +62,8 @@ export default function Announcement() {
               display: 'flex',
               flexDirection: 'column',
               gap: '16px',
+              maxHeight: 'calc(100dvh - 40px)',
+              overflow: 'hidden',
             }}
           >
             <div className="title" style={{ display: 'flex', alignItems: 'center', gap: '12px', fontWeight: 700, fontSize: '18px', color: 'var(--accent)' }}>
@@ -62,15 +74,17 @@ export default function Announcement() {
               </svg>
               <span>公告</span>
             </div>
-            <div style={{ color: 'var(--text)', lineHeight: '1.6', fontSize: '15px' }}>
-              为了增加更多用户方便访问, 新增国内加速地址：<a className="link-button"
-                                                          target="_blank"
-                                                          rel="noopener noreferrer"
-                                                          style={{ color: 'var(--primary)', textDecoration: 'underline', padding: '0 4px', fontWeight: 600 }} href="https://fund.cc.cd/">https://fund.cc.cd/</a>
-              <p>v0.1.8 版本更新内容如下：</p>
-              <p>1. 重构PC表格界面的实现。</p>
-              <p>2. 允许对PC表格列宽拖拽并存储拖拽后的列宽。</p>
-              关于部分用户反馈数据丢失问题，建议大家登录账号进行数据同步。不然切换域名或清理浏览器缓存都会造成数据丢失。
+            <div style={{ color: 'var(--text)', lineHeight: '1.6', fontSize: '15px', overflowY: 'auto', minHeight: 0, flex: 1, paddingRight: '4px' }}>
+              <p>v0.2.4 版本更新内容如下：</p>
+              <p>1. 调整设置持仓相关弹框样式。</p>
+              <p>2. 基金详情弹框支持设置持仓相关参数。</p>
+              <p>3. 添加基金到分组弹框展示持仓金额数据。</p>
+              <p>4. 已登录用户新增手动同步按钮。</p>
+              <br/>
+              <p>答疑：</p>
+              <p>1. 因估值数据源问题，大部分海外基金估值数据不准或没有，暂时没有解决方案。</p>
+              <p>2. 因交易日用户人数过多，为控制服务器免费额度上限，暂时减少数据自动同步频率，新增手动同步按钮。</p>
+              <p>如有建议，欢迎进用户支持群反馈。</p>
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '8px' }}>
