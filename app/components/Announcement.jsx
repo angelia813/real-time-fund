@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-const ANNOUNCEMENT_KEY = 'hasClosedAnnouncement_v21';
+const ANNOUNCEMENT_KEY = 'hasClosedAnnouncement_v24';
 
 export default function Announcement() {
   const [isVisible, setIsVisible] = useState(false);
@@ -75,15 +75,11 @@ export default function Announcement() {
               <span>公告</span>
             </div>
             <div style={{ color: 'var(--text)', lineHeight: '1.6', fontSize: '15px', overflowY: 'auto', minHeight: 0, flex: 1, paddingRight: '4px' }}>
-              <p>v1.0.0 迎来比较大的变化,更新内容如下：</p>
-              <p>1. 完善关联板块及板块估值数据。</p>
-              <p>2. 分组持仓数据独立。</p>
-              <p>3. 新增底部导航栏。</p>
-              <p>4. 新增我的收益展示。</p>
-              <p>5. 新增昨日收益、近1周、近一月等列。</p>
-              <p>6. 新增移动端批量删除(长按表格行触发)。</p>
-              <br/>
-              <p>该版本调整较多,如有建议和问题，欢迎进用户支持群反馈。</p>
+              <p>v1.1.0 更新内容如下：</p>
+              <p>1. 新增分组汇总。</p>
+              <p>2. 新增移动分组功能。</p>
+              <p>3. 移动端新增编辑模式（批量删除、批量移动分组、拖拽顺序）。</p>
+              <p>4. 取消删除和刷新竞态。</p>
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '8px' }}>

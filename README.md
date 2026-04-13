@@ -68,7 +68,8 @@
   - `NEXT_PUBLIC_Supabase_ANON_KEY`：Supabase 匿名公钥
   - `NEXT_PUBLIC_WEB3FORMS_ACCESS_KEY`：Web3Forms Access Key
   - `NEXT_PUBLIC_GA_ID`：Google Analytics Measurement ID（如 `G-xxxx`）
-  - `NEXT_PUBLIC_GITHUB_LATEST_RELEASE_URL`：GitHub 最新 Release 接口地址，用于在页面中展示“发现新版本”提示（如：`https://api.github.com/repos/hzm0321/real-time-fund/releases/latest`）
+  - `NEXT_PUBLIC_GITHUB_LATEST_RELEASE_URL`：GitHub 最新 Release 接口地址，用于在页面中展示"发现新版本"提示（如：`https://api.github.com/repos/hzm0321/real-time-fund/releases/latest`）
+  - `NEXT_PUBLIC_IS_GITHUB_LOGIN`：控制是否开启 GitHub OAuth 登录功能，可选值 `true` / `false`（默认 `false`）
 
 注：如不使用登录、反馈或 GA 统计功能，可不设置对应变量
 
@@ -150,13 +151,31 @@
 
    执行成功后，可在 Table Editor 中看到 `user_configs` 表。
 
+8. 导入关联板块数据（可选）
+
+   项目支持展示基金追踪的关联板块（如指数、行业板块）及其实时涨跌幅。该功能依赖两张数据表：
+   - `fund_related`：基金代码 → 关联板块名称映射
+   - `fund_secid`：关联板块名称 → 东方财富 secid 映射
+
+   这两张表已在 `/doc/supabase.sql` 中创建，数据源位于 `/doc` 目录：
+   - `fund_tracking_targets.csv`：基金追踪目标数据
+   - `related_sector_secid.csv`：关联板块 secid 映射数据
+
+   **导入步骤：**
+   - Supabase控制台 → Table Editor → 选择 `fund_related` 表
+   - 点击右上角 **Insert** → **Import data from CSV**
+   - 上传 `fund_tracking_targets.csv` 文件，确认列映射后点击 **Import**
+   - 同理，向 `fund_secid` 表导入 `related_sector_secid.csv` 文件
+
+   导入成功后，基金卡片将展示其追踪的关联板块及实时涨跌幅。
+
 更多 Supabase 相关内容查阅官方文档。
 
 ### 构建与部署
 
 本项目已配置 GitHub Actions。每次推送到 `main` 分支时，会自动执行构建并部署到 GitHub Pages。
 如需使用 GitHub Actions 部署，请在 GitHub 项目 Settings → Secrets and variables → Actions 中创建对应的 Repository secrets（字段名称与 `.env.local` 保持一致）。
-包括：`NEXT_PUBLIC_Supabase_URL`、`NEXT_PUBLIC_Supabase_ANON_KEY`、`NEXT_PUBLIC_WEB3FORMS_ACCESS_KEY`、`NEXT_PUBLIC_GA_ID`、`NEXT_PUBLIC_GITHUB_LATEST_RELEASE_URL`。
+包括：`NEXT_PUBLIC_Supabase_URL`、`NEXT_PUBLIC_Supabase_ANON_KEY`、`NEXT_PUBLIC_WEB3FORMS_ACCESS_KEY`、`NEXT_PUBLIC_GA_ID`、`NEXT_PUBLIC_GITHUB_LATEST_RELEASE_URL`、`NEXT_PUBLIC_IS_GITHUB_LOGIN`。
 
 若要手动构建：
 ```bash

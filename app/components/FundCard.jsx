@@ -63,7 +63,6 @@ export default function FundCard({
   transactions,
   theme,
   isTradingDay,
-  refreshing,
   getHoldingProfit,
   onToggleFavorite,
   onRemoveFund,
@@ -107,6 +106,16 @@ export default function FundCard({
   }, [dailyEarningsSeries, hasHoldingShare]);
 
   const showFavoriteButton = currentTab === 'all' || currentTab === 'fav';
+  const relatedSectorRaw = f?.relatedSector != null ? String(f.relatedSector).trim() : '';
+  const relatedSectorQuoteName = f?.relatedSectorQuoteName != null
+    ? String(f.relatedSectorQuoteName).trim()
+    : '';
+  const relatedSectorDisplay = relatedSectorQuoteName || relatedSectorRaw;
+  const relatedSectorPctValue = f?.relatedSectorQuotePct == null ? null : Number(f.relatedSectorQuotePct);
+  const hasRelatedSectorPct = relatedSectorPctValue != null && Number.isFinite(relatedSectorPctValue);
+  const relatedSectorPctText = hasRelatedSectorPct
+    ? `${relatedSectorPctValue > 0 ? '+' : ''}${relatedSectorPctValue.toFixed(2)}%`
+    : '';
 
   const style = layoutMode === 'drawer' ? {
     border: 'none',
@@ -166,14 +175,13 @@ export default function FundCard({
           <div className="row" style={{ gap: 4 }}>
             <button
               className="icon-button danger"
-              onClick={() => !refreshing && onRemoveFund?.(f)}
+              onClick={() => onRemoveFund?.(f)}
               title="删除"
-              disabled={refreshing}
               style={{
                 width: '28px',
                 height: '28px',
-                opacity: refreshing ? 0.6 : 1,
-                cursor: refreshing ? 'not-allowed' : 'pointer',
+                opacity: 1,
+                cursor: 'pointer',
               }}
             >
               <TrashIcon width="14" height="14" />
@@ -249,6 +257,37 @@ export default function FundCard({
         )}
       </div>
 
+      {(relatedSectorDisplay || hasRelatedSectorPct) && (
+        <div className="row" style={{ marginBottom: 12 }}>
+          {relatedSectorDisplay ? (
+            <div className="stat" style={{ flexDirection: 'column', gap: 4, minWidth: 0 }}>
+              <span className="label">关联板块</span>
+              <span
+                className="value"
+                title={relatedSectorDisplay}
+                style={{
+                  fontSize: '15px',
+                  lineHeight: 1.2,
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  maxWidth: '100%',
+                }}
+              >
+                {relatedSectorDisplay}
+              </span>
+            </div>
+          ) : null}
+          {hasRelatedSectorPct ? (
+            <Stat
+              label="关联涨幅"
+              value={relatedSectorPctText}
+              delta={relatedSectorPctValue}
+            />
+          ) : null}
+        </div>
+      )}
+
       <div className="row" style={{ marginBottom: 12 }}>
         {!profit ? (
           <div
@@ -284,7 +323,7 @@ export default function FundCard({
                 持仓金额 <SettingsIcon width="12" height="12" style={{ opacity: 0.7 }} />
               </span>
               <span className="value">
-                {masked ? '******' : `¥${profit.amount.toFixed(2)}`}
+                {masked ? '******' : `${profit.amount.toFixed(2)}`}
               </span>
             </div>
             {holding?.firstPurchaseDate && !masked && (() => {
@@ -345,7 +384,7 @@ export default function FundCard({
                                 ? (profit.profitToday / (holding.cost * holding.share)) * 100
                                 : 0,
                             ).toFixed(2)}%`
-                          : `¥${Math.abs(profit.profitToday).toFixed(2)}`}
+                          : `${Math.abs(profit.profitToday).toFixed(2)}`}
                       </>
                   : '--'}
               </span>
@@ -382,7 +421,7 @@ export default function FundCard({
                                 ? (profit.profitTotal / (holding.cost * holding.share)) * 100
                                 : 0,
                             ).toFixed(2)}%`
-                          : `¥${Math.abs(profit.profitTotal).toFixed(2)}`}
+                          : `${Math.abs(profit.profitTotal).toFixed(2)}`}
                       </>}
                 </span>
               </div>
