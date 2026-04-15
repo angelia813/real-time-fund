@@ -28,7 +28,7 @@ import FitText from './FitText';
 import MobileFundCardDrawer from './MobileFundCardDrawer';
 import MobileSettingModal from './MobileSettingModal';
 import MoveGroupModal from './MoveGroupModal';
-import { ArrowUpToLineIcon, CloseIcon, DragIcon, FolderPlusIcon, PencilIcon, SettingsIcon, StarIcon, TrashIcon } from './Icons';
+import { ArrowUpToLineIcon, CloseIcon, DragIcon, FolderPlusIcon, LinkIcon, PencilIcon, SettingsIcon, StarIcon, TrashIcon } from './Icons';
 import { fetchFundPeriodReturns, fetchRelatedSectors, fetchRelatedSectorLiveQuote } from '@/app/api/fund';
 
 const EDIT_MOVE_TO_FRONT_COL = 'editMoveToFront';
@@ -341,6 +341,13 @@ export default function MobileFundTable({
     [data],
   );
 
+  /** 全部/自选下「关联汇总持仓」行不参与编辑模式批量选择 */
+  const batchSelectableCodes = useMemo(
+    () => (Array.isArray(data) ? data.filter((d) => !d?.isHoldingLinked).map((d) => d?.code).filter(Boolean) : []),
+    [data],
+  );
+  const batchSelectableCount = batchSelectableCodes.length;
+
   const editSelectedCodesList = useMemo(() => Array.from(editSelectedCodes || []), [editSelectedCodes]);
 
   const clearEditLongPressTimer = useCallback(() => {
@@ -383,12 +390,30 @@ export default function MobileFundTable({
     });
   }, [selectableCodes]);
 
+  useEffect(() => {
+    const linkedCodes = new Set(
+      (Array.isArray(data) ? data : [])
+        .filter((d) => d && d.isHoldingLinked && d.code)
+        .map((d) => d.code),
+    );
+    if (!linkedCodes.size) return;
+    setEditSelectedCodes((prev) => {
+      if (!prev?.size) return prev;
+      let changed = false;
+      const next = new Set(prev);
+      for (const c of linkedCodes) {
+        if (next.delete(c)) changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [data]);
+
   const setAllEditSelected = useCallback((nextChecked) => {
     setEditSelectedCodes(() => {
       if (!nextChecked) return new Set();
-      return new Set(selectableCodes);
+      return new Set(batchSelectableCodes);
     });
-  }, [selectableCodes]);
+  }, [batchSelectableCodes]);
 
   useEffect(() => () => clearEditLongPressTimer(), [clearEditLongPressTimer]);
 
@@ -978,11 +1003,16 @@ export default function MobileFundTable({
     const isFavorites = favorites?.has?.(code);
     const isGroupTab = isCustomGroupTab;
     const editSelected = code ? editSelectedCodes.has(code) : false;
+    const holdingLocked =
+      (currentTab === 'all' || currentTab === 'fav') &&
+      !!original.isHoldingLinked;
+    const holdingLockedTitle = '持仓来自自定义分组汇总，无法在「全部/自选」设置持仓金额';
 
     if (isEditMode) {
       return (
         <div className="name-cell-content" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <label
+            title={holdingLocked ? '关联持仓不可批量选择' : '选择用于批量操作'}
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -991,16 +1021,18 @@ export default function MobileFundTable({
               width: 26,
               height: 26,
               marginRight: 4,
-              cursor: 'pointer',
+              cursor: holdingLocked ? 'not-allowed' : 'pointer',
+              opacity: holdingLocked ? 0.45 : 1,
             }}
             onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => e.stopPropagation()}
           >
             <input
               type="checkbox"
-              checked={editSelected}
+              disabled={holdingLocked}
+              checked={!holdingLocked && editSelected}
               onChange={() => {
-                if (!code) return;
+                if (!code || holdingLocked) return;
                 setEditSelectedCodes((prev) => {
                   const next = new Set(prev);
                   if (next.has(code)) next.delete(code);
@@ -1012,7 +1044,7 @@ export default function MobileFundTable({
                 width: 18,
                 height: 18,
                 accentColor: 'var(--primary)',
-                cursor: 'pointer',
+                cursor: holdingLocked ? 'not-allowed' : 'pointer',
               }}
             />
           </label>
@@ -1021,6 +1053,23 @@ export default function MobileFundTable({
               className={`name-text ${showFullFundName ? 'show-full' : ''}`}
               title={isUpdated ? '今日净值已更新' : undefined}
             >
+              {holdingLocked ? (
+                <span
+                  title="持仓来自自定义分组汇总"
+                  aria-label="已关联持仓"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    marginRight: 6,
+                    color: 'var(--primary)',
+                    verticalAlign: 'middle',
+                    marginBottom: 2,
+                    position: 'relative',
+                  }}
+                >
+                  <LinkIcon width="14" height="14" />
+                </span>
+              ) : null}
               {info.getValue() ?? '—'}
             </span>
             {holdingAmountDisplay ? (
@@ -1098,22 +1147,41 @@ export default function MobileFundTable({
               }
             }}
           >
+            {holdingLocked ? (
+              <span
+                title="持仓来自自定义分组汇总"
+                aria-label="已关联持仓"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  marginRight: 6,
+                  color: 'var(--primary)',
+                  verticalAlign: 'middle',
+                  bottom: 2,
+                  position: 'relative',
+                }}
+              >
+                <LinkIcon width="14" height="14" />
+              </span>
+            ) : null}
             {info.getValue() ?? '—'}
           </span>
           {holdingAmountDisplay ? (
             <span
               className="muted code-text"
-              role="button"
-              tabIndex={0}
-              title="点击设置持仓"
-              style={{ cursor: 'pointer' }}
+              role={holdingLocked ? undefined : 'button'}
+              tabIndex={holdingLocked ? -1 : 0}
+              title={holdingLocked ? holdingLockedTitle : '点击设置持仓'}
+              style={{ cursor: holdingLocked ? 'not-allowed' : 'pointer' }}
               onClick={(e) => {
                 e.stopPropagation?.();
+                if (holdingLocked) return;
                 onHoldingAmountClickRef.current?.(original, { hasHolding: true });
               }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault();
+                  if (holdingLocked) return;
                   onHoldingAmountClickRef.current?.(original, { hasHolding: true });
                 }
               }}
@@ -1125,17 +1193,19 @@ export default function MobileFundTable({
           ) : code ? (
             <span
               className="muted code-text"
-              role="button"
-              tabIndex={0}
-              title="设置持仓"
-              style={{ cursor: 'pointer' }}
+              role={holdingLocked ? undefined : 'button'}
+              tabIndex={holdingLocked ? -1 : 0}
+              title={holdingLocked ? holdingLockedTitle : '设置持仓'}
+              style={{ cursor: holdingLocked ? 'not-allowed' : 'pointer' }}
               onClick={(e) => {
                 e.stopPropagation?.();
+                if (holdingLocked) return;
                 onHoldingAmountClickRef.current?.(original, { hasHolding: false });
               }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault();
+                  if (holdingLocked) return;
                   onHoldingAmountClickRef.current?.(original, { hasHolding: false });
                 }
               }}
@@ -1156,7 +1226,7 @@ export default function MobileFundTable({
         accessorKey: 'fundName',
         header: () => {
           if (isEditMode) {
-            const allCount = selectableCodes.length;
+            const allCount = batchSelectableCount;
             const selectedCount = editSelectedCodes.size;
             const checked = allCount > 0 && selectedCount === allCount;
             const indeterminate = selectedCount > 0 && selectedCount < allCount;
@@ -1365,9 +1435,9 @@ export default function MobileFundTable({
             ? `${value > 0 ? '+' : ''}${value.toFixed(2)}%`
             : '—';
           return (
-            <div style={{ textAlign: 'right' }}>
-              <span className={cls} style={{ fontWeight: 700 }}>{text}</span>
-            </div>
+              <FitText className={cls} style={{ fontWeight: 700, textAlign: 'right' }} maxFontSize={14} minFontSize={10} as="div">
+                {text}
+              </FitText>
           );
         },
         meta: { align: 'right', cellClassName: 'period-return-cell', width: columnWidthMap.period1w ?? 72 },
@@ -1384,9 +1454,9 @@ export default function MobileFundTable({
             ? `${value > 0 ? '+' : ''}${value.toFixed(2)}%`
             : '—';
           return (
-            <div style={{ textAlign: 'right' }}>
-              <span className={cls} style={{ fontWeight: 700 }}>{text}</span>
-            </div>
+              <FitText className={cls} style={{ fontWeight: 700, textAlign: 'right' }} maxFontSize={14} minFontSize={10} as="div">
+                {text}
+              </FitText>
           );
         },
         meta: { align: 'right', cellClassName: 'period-return-cell', width: columnWidthMap.period1m ?? 72 },
@@ -1403,9 +1473,9 @@ export default function MobileFundTable({
             ? `${value > 0 ? '+' : ''}${value.toFixed(2)}%`
             : '—';
           return (
-            <div style={{ textAlign: 'right' }}>
-              <span className={cls} style={{ fontWeight: 700 }}>{text}</span>
-            </div>
+              <FitText className={cls} style={{ fontWeight: 700, textAlign: 'right' }} maxFontSize={14} minFontSize={10} as="div">
+                {text}
+              </FitText>
           );
         },
         meta: { align: 'right', cellClassName: 'period-return-cell', width: columnWidthMap.period3m ?? 72 },
@@ -1422,9 +1492,9 @@ export default function MobileFundTable({
             ? `${value > 0 ? '+' : ''}${value.toFixed(2)}%`
             : '—';
           return (
-            <div style={{ textAlign: 'right' }}>
-              <span className={cls} style={{ fontWeight: 700 }}>{text}</span>
-            </div>
+              <FitText className={cls} style={{ fontWeight: 700, textAlign: 'right' }} maxFontSize={14} minFontSize={10} as="div">
+                {text}
+              </FitText>
           );
         },
         meta: { align: 'right', cellClassName: 'period-return-cell', width: columnWidthMap.period6m ?? 72 },
@@ -1441,9 +1511,9 @@ export default function MobileFundTable({
             ? `${value > 0 ? '+' : ''}${value.toFixed(2)}%`
             : '—';
           return (
-            <div style={{ textAlign: 'right' }}>
-              <span className={cls} style={{ fontWeight: 700 }}>{text}</span>
-            </div>
+              <FitText className={cls} style={{ fontWeight: 700, textAlign: 'right' }} maxFontSize={14} minFontSize={10} as="div">
+                {text}
+              </FitText>
           );
         },
         meta: { align: 'right', cellClassName: 'period-return-cell', width: columnWidthMap.period1y ?? 72 },
@@ -1697,6 +1767,7 @@ export default function MobileFundTable({
       onReorder,
       data,
       selectableCodes,
+      batchSelectableCount,
       setAllEditSelected,
     ]
   );
@@ -1938,7 +2009,8 @@ export default function MobileFundTable({
                                 if (sel?.removeAllRanges) sel.removeAllRanges();
                               } catch { /* empty */ }
                               setIsEditMode(true);
-                              setEditSelectedCodes(new Set([c]));
+                              const linked = !!row.original?.isHoldingLinked;
+                              setEditSelectedCodes(linked ? new Set() : new Set([c]));
                             }, 550);
                           }}
                           onPointerMove={(e) => {

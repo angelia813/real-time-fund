@@ -45,6 +45,7 @@ import {
   UpdateIcon,
   UserIcon,
   CameraIcon,
+  FolderPlusIcon,
 } from "./components/Icons";
 import AddFundToGroupModal from "./components/AddFundToGroupModal";
 import AddResultModal from "./components/AddResultModal";
@@ -552,6 +553,12 @@ export default function HomePage() {
   const [dcaModal, setDcaModal] = useState({ open: false, fund: null });
   const [clearConfirm, setClearConfirm] = useState(null); // { fund }
   const [donateOpen, setDonateOpen] = useState(false);
+  const [holdingMigrateDialog, setHoldingMigrateDialog] = useState({
+    open: false,
+    code: null,
+    name: '',
+    targetGroupId: null,
+  });
   const [holdings, setHoldings] = useState({}); // { [code]: { share: number, cost: number } }
   /** 自定义分组独立持仓：groupId -> code -> holding */
   const [groupHoldings, setGroupHoldings] = useState({});
@@ -1176,11 +1183,73 @@ export default function HomePage() {
     [fundDailyEarnings]
   );
 
-  const holdingsForTab = useMemo(() => {
+  /**
+   * 全部/自选：当全局 holdings 无该基金持仓，但自定义分组存在持仓时，
+   * 仅用于展示地将其它分组的持仓汇总到当前 tab（不写入 localStorage）。
+   */
+  const linkedHoldingsForAllFav = useMemo(() => {
+    const enabled = (currentTab === 'all' || currentTab === 'fav') && !activeGroupId;
+    if (!enabled) return { derived: {}, linked: new Set() };
+
+    const derived = {};
+    const linked = new Set();
+
+    const hasGlobalHolding = (h) =>
+      !!h && isNumber(h.share) && Number(h.share) > 0;
+
+    for (const fund of funds || []) {
+      const code = fund?.code;
+      if (!code) continue;
+      if (hasGlobalHolding(holdings?.[code])) continue;
+
+      let totalShare = 0;
+      let totalCostShare = 0;
+      let hasAnyCost = false;
+
+      for (const g of groups || []) {
+        const gid = g?.id;
+        if (!gid) continue;
+        const h = groupHoldings?.[gid]?.[code];
+        if (!h) continue;
+        const s = Number(h.share);
+        if (!Number.isFinite(s) || s <= 0) continue;
+        totalShare += s;
+
+        const c = h.cost == null || h.cost === '' ? null : Number(h.cost);
+        if (c != null && Number.isFinite(c) && c > 0) {
+          totalCostShare += c * s;
+          hasAnyCost = true;
+        }
+      }
+
+      if (totalShare > 0) {
+        derived[code] = {
+          share: totalShare,
+          cost: hasAnyCost ? totalCostShare / totalShare : null,
+        };
+        linked.add(code);
+      }
+    }
+
+    return { derived, linked };
+  }, [currentTab, activeGroupId, funds, holdings, groupHoldings, groups]);
+
+  const holdingsForTabWithLinked = useMemo(() => {
     if (currentTab === SUMMARY_TAB_ID) return summaryMergedHoldings;
-    if (!activeGroupId) return holdings;
-    return groupHoldings[activeGroupId] || {};
-  }, [currentTab, summaryMergedHoldings, holdings, groupHoldings, activeGroupId]);
+    if (activeGroupId) return groupHoldings[activeGroupId] || {};
+    if (currentTab !== 'all' && currentTab !== 'fav') return holdings;
+    const derived = linkedHoldingsForAllFav.derived || {};
+    const keys = Object.keys(derived);
+    if (keys.length === 0) return holdings;
+    return { ...(holdings || {}), ...derived };
+  }, [
+    currentTab,
+    activeGroupId,
+    summaryMergedHoldings,
+    holdings,
+    groupHoldings,
+    linkedHoldingsForAllFav,
+  ]);
 
   const dcaPlansForTab = useMemo(() => {
     const scoped = migrateDcaPlansToScoped(dcaPlans);
@@ -1268,7 +1337,7 @@ export default function HomePage() {
 
       const profitByCode =
         sortBy === 'holdingAmount' || sortBy === 'todayProfit' || sortBy === 'holding'
-          ? new Map(filtered.map((f) => [f.code, getHoldingProfitForTab(f, holdingsForTab[f.code])]))
+          ? new Map(filtered.map((f) => [f.code, getHoldingProfitForTab(f, holdingsForTabWithLinked[f.code])]))
           : null;
 
       return filtered.sort((a, b) => {
@@ -1351,7 +1420,7 @@ export default function HomePage() {
         return 0;
       });
     },
-    [scopedFunds, currentTab, groups, sortBy, sortOrder, holdingsForTab, getHoldingProfitForTab, groupFundSearchTerm, shouldShowGroupFundSearch],
+    [scopedFunds, currentTab, groups, sortBy, sortOrder, holdingsForTabWithLinked, getHoldingProfitForTab, groupFundSearchTerm, shouldShowGroupFundSearch],
   );
 
   const latestDailyByCode = useMemo(() => {
@@ -1410,11 +1479,14 @@ export default function HomePage() {
         const estimateTime = f.noValuation ? (f.jzrq || '-') : (f.gztime || f.time || '-');
         const hasTodayEstimate = !f.noValuation && isString(f.gztime) && f.gztime.startsWith(todayStr);
 
-        const holding = holdingsForTab[f.code];
+        const holding = holdingsForTabWithLinked[f.code];
+        const isHoldingLinked =
+          (currentTab === 'all' || currentTab === 'fav') &&
+          linkedHoldingsForAllFav.linked?.has?.(f.code);
         const profit = getHoldingProfitForTab(f, holding);
         const amount = profit ? profit.amount : null;
         const holdingAmount =
-          amount == null ? '未设置' : `¥${amount.toFixed(2)}`;
+          amount == null ? '未设置' : `¥${Number(amount).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
         const holdingAmountValue = amount;
         const holdingDaysValue = holding?.firstPurchaseDate
           ? dayjs.tz(todayStr, TZ).diff(dayjs.tz(holding.firstPurchaseDate, TZ), 'day')
@@ -1504,6 +1576,7 @@ export default function HomePage() {
           rawFund: f,
           code: f.code,
           fundName: f.name,
+          isHoldingLinked: !!isHoldingLinked,
           isUpdated: f.jzrq === todayStr,
           hasDca: dcaPlansForTab[f.code]?.enabled === true,
           latestNav,
@@ -1541,7 +1614,7 @@ export default function HomePage() {
       }),
     [
       displayFunds,
-      holdingsForTab,
+      holdingsForTabWithLinked,
       isTradingDay,
       todayStr,
       getHoldingProfitForTab,
@@ -1549,6 +1622,7 @@ export default function HomePage() {
       latestDailyByCode,
       currentTab,
       summaryHoldingSourceGroupByCode,
+      linkedHoldingsForAllFav,
     ],
   );
 
@@ -1667,6 +1741,22 @@ export default function HomePage() {
           return gid ? trade.groupId !== gid : !trade.groupId;
         });
         storageHelper.setItem('pendingTrades', JSON.stringify(next));
+        return next;
+      });
+
+      const dcaScope = gid || DCA_SCOPE_GLOBAL;
+      setDcaPlans((prev) => {
+        const scoped = migrateDcaPlansToScoped(prev);
+        if (!scoped[dcaScope]) return prev;
+        const next = { ...scoped };
+        const bucket = { ...next[dcaScope] };
+        delete bucket[code];
+        if (Object.keys(bucket).length === 0) {
+          delete next[dcaScope];
+        } else {
+          next[dcaScope] = bucket;
+        }
+        storageHelper.setItem('dcaPlans', JSON.stringify(next));
         return next;
       });
     }
@@ -4025,7 +4115,7 @@ export default function HomePage() {
             const code = u?.code;
             if (!code) continue;
             if (!fundCodeStillInStorage(code)) continue;
-            const h = holdingsForTab?.[code];
+            const h = holdingsForTabWithLinked?.[code];
             const share = h?.share;
             const cost = h?.cost;
             // 规则 1：基金存在持仓数据（只要求份额有效）
@@ -5698,6 +5788,7 @@ export default function HomePage() {
         groups: JSON.parse(localStorage.getItem('groups') || '[]'),
         collapsedCodes: JSON.parse(localStorage.getItem('collapsedCodes') || '[]'),
         collapsedTrends: JSON.parse(localStorage.getItem('collapsedTrends') || '[]'),
+        collapsedEarnings: JSON.parse(localStorage.getItem('collapsedEarnings') || '[]'),
         refreshMs: parseInt(localStorage.getItem('refreshMs') || '30000', 10),
         viewMode: localStorage.getItem('viewMode') === 'list' ? 'list' : 'card',
         holdings: JSON.parse(localStorage.getItem('holdings') || '{}'),
@@ -5705,6 +5796,8 @@ export default function HomePage() {
         pendingTrades: JSON.parse(localStorage.getItem('pendingTrades') || '[]'),
         transactions: JSON.parse(localStorage.getItem('transactions') || '{}'),
         dcaPlans: JSON.parse(localStorage.getItem('dcaPlans') || '{}'),
+        customSettings: JSON.parse(localStorage.getItem('customSettings') || '{}'),
+        fundDailyEarnings: JSON.parse(localStorage.getItem('fundDailyEarnings') || '{}'),
         exportedAt: nowInTz().toISOString()
       };
       const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
@@ -5893,6 +5986,60 @@ export default function HomePage() {
           storageHelper.setItem('dcaPlans', JSON.stringify(mergedDca));
         }
 
+        if (isPlainObject(data.customSettings)) {
+          try {
+            const currentCustomSettings = JSON.parse(localStorage.getItem('customSettings') || '{}');
+            const mergedSettings = {
+              ...(isPlainObject(currentCustomSettings) ? currentCustomSettings : {}),
+              ...data.customSettings,
+            };
+            window.localStorage.setItem('customSettings', JSON.stringify(mergedSettings));
+            triggerCustomSettingsSync();
+            if (mergedSettings.localSortRules && Array.isArray(mergedSettings.localSortRules)) {
+              setSortRules(mergedSettings.localSortRules);
+            }
+            if (mergedSettings.localSortDisplayMode && SORT_DISPLAY_MODES.has(mergedSettings.localSortDisplayMode)) {
+              setSortDisplayMode(mergedSettings.localSortDisplayMode);
+            }
+            if (typeof mergedSettings.pcContainerWidth === 'number' && Number.isFinite(mergedSettings.pcContainerWidth)) {
+              setContainerWidth(Math.min(2000, Math.max(600, mergedSettings.pcContainerWidth)));
+            }
+            if (typeof mergedSettings.showMarketIndexPc === 'boolean') setShowMarketIndexPc(mergedSettings.showMarketIndexPc);
+            if (typeof mergedSettings.showMarketIndexMobile === 'boolean') setShowMarketIndexMobile(mergedSettings.showMarketIndexMobile);
+            if (typeof mergedSettings.showGroupFundSearchPc === 'boolean') setShowGroupFundSearchPc(mergedSettings.showGroupFundSearchPc);
+            if (typeof mergedSettings.showGroupFundSearchMobile === 'boolean') setShowGroupFundSearchMobile(mergedSettings.showGroupFundSearchMobile);
+          } catch { }
+        }
+
+        if (isPlainObject(data.fundDailyEarnings)) {
+          try {
+            const incomingScoped = normalizeFundDailyEarningsScoped(data.fundDailyEarnings);
+            const currentScoped = normalizeFundDailyEarningsScoped(
+              JSON.parse(localStorage.getItem('fundDailyEarnings') || '{}')
+            );
+            const mergedDaily = { ...currentScoped };
+            Object.entries(incomingScoped).forEach(([scope, bucket]) => {
+              if (!isPlainObject(bucket)) return;
+              const existingBucket = isPlainObject(mergedDaily[scope]) ? mergedDaily[scope] : {};
+              const mergedBucket = { ...existingBucket };
+              Object.entries(bucket).forEach(([code, list]) => {
+                if (!Array.isArray(list)) return;
+                const existingList = Array.isArray(mergedBucket[code]) ? mergedBucket[code] : [];
+                const existingByDate = new Map(existingList.map(item => [item.date, item]));
+                list.forEach(item => {
+                  if (!item || !item.date || !Number.isFinite(item.earnings)) return;
+                  existingByDate.set(item.date, item);
+                });
+                mergedBucket[code] = Array.from(existingByDate.values())
+                  .sort((a, b) => a.date.localeCompare(b.date));
+              });
+              mergedDaily[scope] = mergedBucket;
+            });
+            setFundDailyEarnings(mergedDaily);
+            storageHelper.setItem('fundDailyEarnings', JSON.stringify(mergedDaily));
+          } catch { }
+        }
+
         // 导入成功后，仅刷新新追加的基金
         if (appendedCodes.length) {
           // 这里需要确保 refreshAll 不会因为闭包问题覆盖掉刚刚合并好的 mergedFunds
@@ -6036,14 +6183,6 @@ export default function HomePage() {
     return () => window.removeEventListener('keydown', onKey);
   }, [settingsOpen]);
 
-  const getGroupName = () => {
-    if (currentTab === 'all') return '全部资产';
-    if (currentTab === 'fav') return '自选资产';
-    if (currentTab === SUMMARY_TAB_ID) return '汇总资产';
-    const group = groups.find(g => g.id === currentTab);
-    return group ? `${group.name}资产` : '分组资产';
-  };
-
   const containerClassName = [
     'container',
     isMobile && mobileMainTab === 'mine' ? 'mine-mobile-root' : 'content',
@@ -6069,13 +6208,36 @@ export default function HomePage() {
 
   const handleHoldingAmountClickRow = useCallback((row, meta) => {
     if (!row || !row.code) return;
+    if ((currentTab === 'all' || currentTab === 'fav') && row.isHoldingLinked) {
+      showToast('该基金持仓来自自定义分组汇总，无法在「全部/自选」设置持仓金额', 'info');
+      return;
+    }
+
+    // 自定义分组：未设置持仓时，如果“全部”存在全局持仓，则提示迁移
+    if (activeGroupId && meta?.hasHolding === false) {
+      const gh = groupHoldings?.[activeGroupId]?.[row.code];
+      const hasGroupShare = gh && isNumber(gh.share) && gh.share > 0;
+      const global = holdings?.[row.code];
+      const hasGlobalShare = global && isNumber(global.share) && global.share > 0;
+      if (!hasGroupShare && hasGlobalShare) {
+        const name = row.rawFund?.name ?? row.fundName ?? row.code;
+        setHoldingMigrateDialog({
+          open: true,
+          code: row.code,
+          name,
+          targetGroupId: activeGroupId,
+        });
+        return;
+      }
+    }
+
     const fund = row.rawFund || { code: row.code, name: row.fundName };
     if (meta?.hasHolding) {
       setActionModal({ open: true, fund });
     } else {
       setHoldingModal({ open: true, fund });
     }
-  }, []);
+  }, [currentTab, showToast]);
 
   const handleHoldingProfitClickRow = useCallback((row) => {
     if (!row || !row.code) return;
@@ -6083,7 +6245,33 @@ export default function HomePage() {
     setPercentModes((prev) => ({ ...prev, [row.code]: !prev[row.code] }));
   }, []);
 
-  const openHoldingModal = useCallback((fund) => setHoldingModal({ open: true, fund }), []);
+  const openHoldingModal = useCallback((fund) => {
+    const code = fund?.code;
+    if ((currentTab === 'all' || currentTab === 'fav') && code && linkedHoldingsForAllFav.linked?.has?.(code)) {
+      showToast('该基金持仓来自自定义分组汇总，无法在「全部/自选」设置持仓金额', 'info');
+      return;
+    }
+
+    // 自定义分组：卡片视图/抽屉中“未设置持仓”点击时也走同样迁移提示
+    if (activeGroupId && code) {
+      const gh = groupHoldings?.[activeGroupId]?.[code];
+      const hasGroupShare = gh && isNumber(gh.share) && gh.share > 0;
+      const global = holdings?.[code];
+      const hasGlobalShare = global && isNumber(global.share) && global.share > 0;
+      if (!hasGroupShare && hasGlobalShare) {
+        const name = fund?.name ?? code;
+        setHoldingMigrateDialog({
+          open: true,
+          code,
+          name,
+          targetGroupId: activeGroupId,
+        });
+        return;
+      }
+    }
+
+    setHoldingModal({ open: true, fund });
+  }, [currentTab, linkedHoldingsForAllFav, showToast]);
   const openActionModal = useCallback((fund) => setActionModal({ open: true, fund }), []);
   const togglePercentMode = useCallback((code) => {
     setPercentModes((prev) => ({ ...prev, [code]: !prev[code] }));
@@ -6101,7 +6289,7 @@ export default function HomePage() {
       currentTab,
       favorites,
       dcaPlans: dcaPlansForTab,
-      holdings: holdingsForTab,
+      holdings: holdingsForTabWithLinked,
       percentModes,
       todayPercentModes,
       fundDailyEarnings: currentFundDailyEarnings,
@@ -6124,13 +6312,14 @@ export default function HomePage() {
       onToggleEarningsCollapse: toggleEarningsCollapse,
       masked: maskAmounts,
       layoutMode: 'drawer',
+      isHoldingLinked: !!row?.isHoldingLinked,
     };
   }, [
     todayStr,
     currentTab,
     favorites,
     dcaPlansForTab,
-    holdingsForTab,
+    holdingsForTabWithLinked,
     percentModes,
     todayPercentModes,
     currentFundDailyEarnings,
@@ -6559,6 +6748,7 @@ export default function HomePage() {
           onHeightChange={setMarketIndexAccordionHeight}
           isMobile={isMobile}
           onCustomSettingsChange={triggerCustomSettingsSync}
+          refreshing={refreshing}
         />
       )}
       <div className="grid">
@@ -6795,8 +6985,9 @@ export default function HomePage() {
             <>
               <GroupSummary
                   funds={displayFunds}
-                  holdings={holdingsForTab}
-                  groupName={getGroupName()}
+                  holdings={holdingsForTabWithLinked}
+                  portfolioTabId={currentTab}
+                  groups={groups}
                   getProfit={getHoldingProfitForTab}
                   summaryTotalsOverride={
                     currentTab === SUMMARY_TAB_ID ? summaryTabPortfolioTotals : null
@@ -6955,11 +7146,15 @@ export default function HomePage() {
                         >
                             <FundCard
                               fund={f}
+                              isHoldingLinked={
+                                (currentTab === 'all' || currentTab === 'fav') &&
+                                linkedHoldingsForAllFav.linked?.has?.(f?.code)
+                              }
                               todayStr={todayStr}
                               currentTab={currentTab}
                               favorites={favorites}
                               dcaPlans={dcaPlansForTab}
-                              holdings={holdingsForTab}
+                              holdings={holdingsForTabWithLinked}
                               percentModes={percentModes}
                               todayPercentModes={todayPercentModes}
                               fundDailyEarnings={currentFundDailyEarnings}
@@ -7260,7 +7455,7 @@ export default function HomePage() {
           <AddFundToGroupModal
             allFunds={funds}
             currentGroupCodes={groups.find(g => g.id === currentTab)?.codes || []}
-            holdings={holdingsForTab}
+            holdings={holdingsForTabWithLinked}
             onClose={() => setAddFundToGroupOpen(false)}
             onAdd={handleAddFundsToGroup}
           />
@@ -7289,7 +7484,7 @@ export default function HomePage() {
           <TradeModal
             type={tradeModal.type}
             fund={tradeModal.fund}
-            holding={holdingsForTab[tradeModal.fund?.code]}
+            holding={holdingsForTabWithLinked[tradeModal.fund?.code]}
             onClose={() => setTradeModal({ open: false, fund: null, type: 'buy' })}
             onConfirm={(data) => handleTrade(tradeModal.fund, data)}
             pendingTrades={pendingTrades}
@@ -7395,7 +7590,7 @@ export default function HomePage() {
         {holdingModal.open && (
           <HoldingEditModal
             fund={holdingModal.fund}
-            holding={holdingsForTab[holdingModal.fund?.code]}
+            holding={holdingsForTabWithLinked[holdingModal.fund?.code]}
             onClose={() => setHoldingModal({ open: false, fund: null })}
             onSave={(data) => handleSaveHolding(holdingModal.fund?.code, data)}
             onOpenTrade={() => {
@@ -7403,6 +7598,46 @@ export default function HomePage() {
               if (!f) return;
               setHoldingModal({ open: false, fund: null });
               setTradeModal({ open: true, fund: f, type: 'buy' });
+            }}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {holdingMigrateDialog.open && (
+          <ConfirmModal
+            title="提示"
+            messageContent={
+              <div>
+                {holdingMigrateDialog.name || holdingMigrateDialog.code || '该基金'}
+                在全部分组中存在持仓数据，请在全部分组清空该基金持仓或迁移数据到本分组。
+              </div>
+            }
+            icon={<FolderPlusIcon width="20" height="20" className="shrink-0 text-[var(--primary)]" />}
+            confirmVariant="primary"
+            confirmText="迁移数据到本分组"
+            onCancel={() => setHoldingMigrateDialog({ open: false, code: null, name: '', targetGroupId: null })}
+            onConfirm={async () => {
+              const code = holdingMigrateDialog.code;
+              const gid = holdingMigrateDialog.targetGroupId;
+              if (!code || !gid) {
+                setHoldingMigrateDialog({ open: false, code: null, name: '', targetGroupId: null });
+                return;
+              }
+              try {
+                await handleMoveFunds({
+                  codes: [code],
+                  fromTab: 'all',
+                  targetId: gid,
+                  overwrite: true,
+                });
+                showToast('已迁移持仓数据到本分组', 'success');
+              } catch (e) {
+                console.warn('迁移持仓失败', e);
+                showToast('迁移失败，请稍后再试', 'error');
+              } finally {
+                setHoldingMigrateDialog({ open: false, code: null, name: '', targetGroupId: null });
+              }
             }}
           />
         )}

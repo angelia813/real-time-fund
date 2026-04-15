@@ -18,6 +18,7 @@ import {
   StarIcon,
   SwitchIcon,
   TrashIcon,
+  LinkIcon,
 } from './Icons';
 
 dayjs.extend(utc);
@@ -48,6 +49,7 @@ const formatDisplayDate = (value) => {
 
 export default function FundCard({
   fund: f,
+  isHoldingLinked = false,
   todayStr,
   currentTab,
   favorites,
@@ -117,6 +119,9 @@ export default function FundCard({
     ? `${relatedSectorPctValue > 0 ? '+' : ''}${relatedSectorPctValue.toFixed(2)}%`
     : '';
 
+  const holdingLocked = (currentTab === 'all' || currentTab === 'fav') && isHoldingLinked;
+  const holdingLockedTitle = '持仓来自自定义分组汇总，无法在「全部/自选」设置持仓金额';
+
   const style = layoutMode === 'drawer' ? {
     border: 'none',
     boxShadow: 'none',
@@ -153,6 +158,23 @@ export default function FundCard({
               className="name-text"
               title={f.jzrq === todayStr ? '今日净值已更新' : ''}
             >
+              {isHoldingLinked ? (
+                <span
+                  title="持仓来自自定义分组汇总"
+                  aria-label="已关联持仓"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    marginRight: 6,
+                    color: 'var(--primary)',
+                    verticalAlign: 'middle',
+                    position: 'relative',
+                    bottom: 2,
+                  }}
+                >
+                  <LinkIcon width="14" height="14" />
+                </span>
+              ) : null}
               {f.name}
             </span>
             <span className="muted">
@@ -302,28 +324,40 @@ export default function FundCard({
                 display: 'flex',
                 alignItems: 'center',
                 gap: 4,
-                cursor: 'pointer',
+                cursor: holdingLocked ? 'not-allowed' : 'pointer',
               }}
-              onClick={() => onHoldingClick?.(f)}
+              title={holdingLocked ? holdingLockedTitle : '设置持仓'}
+              onClick={() => {
+                if (holdingLocked) return;
+                onHoldingClick?.(f);
+              }}
             >
-              未设置  <SettingsIcon width="12" height="12" />
+              未设置 {holdingLocked ? null : <SettingsIcon width="12" height="12" />}
             </div>
           </div>
         ) : (
           <>
             <div
               className="stat"
-              style={{ cursor: 'pointer', flexDirection: 'column', gap: 4 }}
-              onClick={() => onActionClick?.(f)}
+              style={{
+                cursor: holdingLocked ? 'not-allowed' : 'pointer',
+                flexDirection: 'column',
+                gap: 4,
+              }}
+              title={holdingLocked ? holdingLockedTitle : '点击设置持仓'}
+              onClick={() => {
+                if (holdingLocked) return;
+                onActionClick?.(f);
+              }}
             >
               <span
                 className="label"
                 style={{ display: 'flex', alignItems: 'center', gap: 4 }}
               >
-                持仓金额 <SettingsIcon width="12" height="12" style={{ opacity: 0.7 }} />
+                持仓金额 {holdingLocked ? null : <SettingsIcon width="12" height="12" style={{ opacity: 0.7 }} />}
               </span>
               <span className="value">
-                {masked ? '******' : `${profit.amount.toFixed(2)}`}
+                {masked ? '******' : `${Number(profit.amount).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
               </span>
             </div>
             {holding?.firstPurchaseDate && !masked && (() => {
