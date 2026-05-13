@@ -62,6 +62,7 @@ import SuccessModal from "./components/SuccessModal";
 import TradeModal from "./components/TradeModal";
 import TransactionHistoryModal from "./components/TransactionHistoryModal";
 import TutorialDrawer from "./components/TutorialDrawer";
+import UpdateLogModal from "./components/UpdateLogModal";
 import UserMenu from "./components/UserMenu";
 import RefreshButton from "./components/RefreshButton";
 // 低频弹窗：懒加载，减少首屏 JS 解析体积
@@ -431,6 +432,8 @@ export default function HomePage() {
   const pcBatchClearSelectionRef = useRef(null); // 由 PcFundTable 注入，批量删除二次确认成功后清空表格多选
   const mobileBatchClearSelectionRef = useRef(null); // 由 MobileFundTable 注入，批量删除二次确认成功后退出编辑态
 
+  const isSchedulingDcaRef = useRef(false);
+
   const todayStr = formatDate();
 
   const isMobile = useIsMobile();
@@ -442,6 +445,7 @@ export default function HomePage() {
   const [portfolioEarningsOpen, setPortfolioEarningsOpen] = useState(false);
   const [mobileFundDrawerOpen, setMobileFundDrawerOpen] = useState(false);
   const [tutorialDrawerOpen, setTutorialDrawerOpen] = useState(false);
+  const [updateLogOpen, setUpdateLogOpen] = useState(false);
   const [mobileTableSettingModalOpen, setMobileTableSettingModalOpen] = useState(false);
   const [fundTagsEdit, setFundTagsEdit] = useState({
     open: false,
@@ -517,6 +521,7 @@ export default function HomePage() {
         } else {
           if (gid) continue;
         }
+        if (tx.isHistoryOnly) continue;
         const s = Number(tx.share);
         if (!Number.isFinite(s) || s <= 0) continue;
         if (tx.type === 'buy') buyToday += s;
@@ -2429,6 +2434,11 @@ export default function HomePage() {
       }
       dirtyKeysRef.current.add(key);
 
+      // fundValuationTimeseries 参与云端同步，但不主动触发同步，等待其他操作触发时一并提交
+      if (key === 'fundValuationTimeseries') {
+        return;
+      }
+
       if (!skipSyncRef.current) {
         const now = nowInTz().toISOString();
         storageStore.setItem('localUpdatedAt', now);
@@ -2444,7 +2454,7 @@ export default function HomePage() {
   }, [setOnSync, scheduleSync]);
 
   useEffect(() => {
-    // 仅以下 key 的变更会触发云端同步；fundValuationTimeseries 不在其中
+    // 仅以下 key 的跨标签页变更会触发云端同步；fundValuationTimeseries 采用跟随同步策略，不主动触发
     const keys = new Set(['funds', 'tags', 'favorites', 'groups', 'collapsedCodes', 'collapsedTrends', 'collapsedEarnings', 'refreshMs', 'holdings', 'groupHoldings', 'pendingTrades', 'dcaPlans', 'customSettings', 'fundDailyEarnings']);
     const onStorage = (e) => {
       if (!e.key) return;
@@ -2703,123 +2713,138 @@ export default function HomePage() {
     const codesSet = new Set(funds.map((f) => f.code));
     if (codesSet.size === 0) return;
 
-    const scoped = migrateDcaPlansToScoped(dcaPlans);
-    const groupIdSet = new Set(groups.map((g) => g?.id).filter(Boolean));
+    if (isSchedulingDcaRef.current) return;
+    isSchedulingDcaRef.current = true;
 
-    const today = toTz(todayStr).startOf('day');
-    let nextPlans;
     try {
-      nextPlans = JSON.parse(JSON.stringify(scoped));
-    } catch {
-      nextPlans = { ...scoped };
-    }
-    const newPending = [];
+      const scoped = migrateDcaPlansToScoped(dcaPlans);
+      const groupIdSet = new Set(groups.map((g) => g?.id).filter(Boolean));
 
-    const years = new Set([today.year()]);
-    Object.values(scoped).forEach((bucket) => {
-      if (!isPlainObject(bucket)) return;
-      Object.values(bucket).forEach((plan) => {
-        if (plan?.firstDate) years.add(toTz(plan.firstDate).year());
-        if (plan?.lastDate) years.add(toTz(plan.lastDate).year());
-      });
-    });
-    await loadHolidaysForYears([...years]);
-
-    const processBucket = (scopeKey, bucket) => {
-      if (!isPlainObject(bucket)) return;
-      const tradeGid = scopeKey === DCA_SCOPE_GLOBAL ? null : scopeKey;
-      if (tradeGid && !groupIdSet.has(tradeGid)) return;
-
-      Object.entries(bucket).forEach(([code, plan]) => {
-        if (!plan || !plan.enabled) return;
-        if (!codesSet.has(code)) return;
-
-        const amount = Number(plan.amount);
-        const feeRate = Number(plan.feeRate) || 0;
-        if (!amount || amount <= 0) return;
-
-        const cycle = plan.cycle || 'monthly';
-        if (!plan.firstDate) return;
-
-        const first = toTz(plan.firstDate).startOf('day');
-        if (today.isBefore(first, 'day')) return;
-
-        const last = plan.lastDate ? toTz(plan.lastDate).startOf('day') : null;
-
-        let current = last ? last.clone() : first.clone();
-        let lastGenerated = null;
-
-        const stepOnce = () => {
-          if (cycle === 'daily') return current.add(1, 'day');
-          if (cycle === 'weekly') return current.add(1, 'week');
-          if (cycle === 'biweekly') return current.add(2, 'week');
-          if (cycle === 'monthly') return current.add(1, 'month');
-          return current.add(1, 'day');
-        };
-
-        if (last) {
-          current = stepOnce();
-        }
-
-        while (true) {
-          if (current.isAfter(today, 'day')) break;
-
-          if (!current.isBefore(first, 'day') && isDateTradingDay(current)) {
-            const dateStr = current.format('YYYY-MM-DD');
-
-            const pending = {
-              id: `dca_${scopeKey}_${code}_${dateStr}_${Date.now()}`,
-              fundCode: code,
-              fundName: (funds.find(f => f.code === code) || {}).name,
-              type: 'buy',
-              share: null,
-              amount,
-              feeRate,
-              feeMode: undefined,
-              feeValue: undefined,
-              date: dateStr,
-              isAfter3pm: false,
-              isDca: true,
-              timestamp: Date.now(),
-              ...(tradeGid ? { groupId: tradeGid } : {}),
-            };
-            newPending.push(pending);
-            lastGenerated = current;
-          }
-          current = stepOnce();
-        }
-
-        if (lastGenerated) {
-          if (!nextPlans[scopeKey]) nextPlans[scopeKey] = {};
-          nextPlans[scopeKey][code] = {
-            ...plan,
-            lastDate: lastGenerated.format('YYYY-MM-DD')
-          };
-        }
-      });
-    };
-
-    processBucket(DCA_SCOPE_GLOBAL, scoped[DCA_SCOPE_GLOBAL]);
-    Object.keys(scoped).forEach((k) => {
-      if (k === DCA_SCOPE_GLOBAL) return;
-      processBucket(k, scoped[k]);
-    });
-
-    if (newPending.length === 0) {
-      if (JSON.stringify(nextPlans) !== JSON.stringify(scoped)) {
-        setDcaPlans(nextPlans);
+      const today = toTz(todayStr).startOf('day');
+      let nextPlans;
+      try {
+        nextPlans = JSON.parse(JSON.stringify(scoped));
+      } catch {
+        nextPlans = { ...scoped };
       }
-      return;
+      const newPending = [];
+
+      const years = new Set([today.year()]);
+      Object.values(scoped).forEach((bucket) => {
+        if (!isPlainObject(bucket)) return;
+        Object.values(bucket).forEach((plan) => {
+          if (plan?.firstDate) years.add(toTz(plan.firstDate).year());
+          if (plan?.lastDate) years.add(toTz(plan.lastDate).year());
+        });
+      });
+      await loadHolidaysForYears([...years]);
+
+      const processBucket = (scopeKey, bucket) => {
+        if (!isPlainObject(bucket)) return;
+        const tradeGid = scopeKey === DCA_SCOPE_GLOBAL ? null : scopeKey;
+        if (tradeGid && !groupIdSet.has(tradeGid)) return;
+
+        Object.entries(bucket).forEach(([code, plan]) => {
+          if (!plan || !plan.enabled) return;
+          if (!codesSet.has(code)) return;
+
+          const amount = Number(plan.amount);
+          const feeRate = Number(plan.feeRate) || 0;
+          if (!amount || amount <= 0) return;
+
+          const cycle = plan.cycle || 'monthly';
+          if (!plan.firstDate) return;
+
+          const first = toTz(plan.firstDate).startOf('day');
+          if (today.isBefore(first, 'day')) return;
+
+          const last = plan.lastDate ? toTz(plan.lastDate).startOf('day') : null;
+
+          let current = last ? last.clone() : first.clone();
+          let lastGenerated = null;
+
+          const stepOnce = () => {
+            if (cycle === 'daily') return current.add(1, 'day');
+            if (cycle === 'weekly') return current.add(1, 'week');
+            if (cycle === 'biweekly') return current.add(2, 'week');
+            if (cycle === 'monthly') return current.add(1, 'month');
+            return current.add(1, 'day');
+          };
+
+          if (last) {
+            current = stepOnce();
+          }
+
+          while (true) {
+            if (current.isAfter(today, 'day')) break;
+
+            if (!current.isBefore(first, 'day') && isDateTradingDay(current)) {
+              const dateStr = current.format('YYYY-MM-DD');
+
+              const pending = {
+                id: `dca_${scopeKey}_${code}_${dateStr}`,
+                fundCode: code,
+                fundName: (funds.find(f => f.code === code) || {}).name,
+                type: 'buy',
+                share: null,
+                amount,
+                feeRate,
+                feeMode: undefined,
+                feeValue: undefined,
+                date: dateStr,
+                isAfter3pm: false,
+                isDca: true,
+                timestamp: Date.now(),
+                ...(tradeGid ? { groupId: tradeGid } : {}),
+              };
+              newPending.push(pending);
+              lastGenerated = current;
+            }
+            current = stepOnce();
+          }
+
+          if (lastGenerated) {
+            if (!nextPlans[scopeKey]) nextPlans[scopeKey] = {};
+            nextPlans[scopeKey][code] = {
+              ...plan,
+              lastDate: lastGenerated.format('YYYY-MM-DD')
+            };
+          }
+        });
+      };
+
+      processBucket(DCA_SCOPE_GLOBAL, scoped[DCA_SCOPE_GLOBAL]);
+      Object.keys(scoped).forEach((k) => {
+        if (k === DCA_SCOPE_GLOBAL) return;
+        processBucket(k, scoped[k]);
+      });
+
+      if (newPending.length === 0) {
+        if (JSON.stringify(nextPlans) !== JSON.stringify(scoped)) {
+          setDcaPlans(nextPlans);
+        }
+        return;
+      }
+
+      setDcaPlans(nextPlans);
+
+      const pendingSnapshot = useStorageStore.getState().pendingTrades;
+      const snapshotIds = new Set((Array.isArray(pendingSnapshot) ? pendingSnapshot : []).map((t) => t.id));
+      const uniqueNewPending = newPending.filter((t) => !snapshotIds.has(t.id));
+
+      setPendingTrades((prev) => {
+        const existingIds = new Set((prev || []).map((t) => t.id));
+        const unique = newPending.filter((t) => !existingIds.has(t.id));
+        if (unique.length === 0) return prev;
+        return [...(prev || []), ...unique];
+      });
+
+      if (uniqueNewPending.length > 0) {
+        showToast(`已生成 ${uniqueNewPending.length} 笔定投买入`, 'success');
+      }
+    } finally {
+      isSchedulingDcaRef.current = false;
     }
-
-    setDcaPlans(nextPlans);
-
-    setPendingTrades(prev => {
-      const merged = [...(prev || []), ...newPending];
-      return merged;
-    });
-
-    showToast(`已生成 ${newPending.length} 笔定投买入`, 'success');
   }, [isTradingDay, dcaPlans, funds, todayStr, storageHelper, groups]);
 
   useEffect(() => {
@@ -3481,32 +3506,30 @@ export default function HomePage() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // 实时同步
-  useEffect(() => {
-    if (!isSupabaseConfigured || !user?.id) return;
-    const deviceId = deviceIdRef.current;
-    if (!deviceId) return; // 确保设备ID已初始化
-
-    const channel = supabase
-      .channel(`user-configs-${user.id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'user_configs', filter: `last_device_id=neq.${deviceId}` }, async (payload) => {
-        if (deviceConflictModalOpenRef.current) return; // 如果有拦截弹窗，忽略实时推送，防止覆盖本地数据
-        if (payload.eventType !== 'INSERT' && payload.eventType !== 'UPDATE') return;
-        const incoming = payload?.new?.data;
-        if (!isPlainObject(incoming)) return;
-        const incomingDeviceId = incoming?._syncMeta?.deviceId ? String(incoming._syncMeta.deviceId) : '';
-        if (incomingDeviceId && deviceIdRef.current && incomingDeviceId === deviceIdRef.current) return;
-        const incomingComparable = getComparablePayload(incoming);
-        if (!incomingComparable || incomingComparable === lastSyncedRef.current) return;
-        await applyCloudConfig(incoming, payload.new.updated_at);
-      })
-      .subscribe();
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [user?.id]);
-
-
+  // // 实时同步
+  // useEffect(() => {
+  //   if (!isSupabaseConfigured || !user?.id) return;
+  //   const deviceId = deviceIdRef.current;
+  //   if (!deviceId) return; // 确保设备ID已初始化
+  //
+  //   const channel = supabase
+  //     .channel(`user-configs-${user.id}`)
+  //     .on('postgres_changes', { event: '*', schema: 'public', table: 'user_configs', filter: `last_device_id=neq.${deviceId}` }, async (payload) => {
+  //       if (deviceConflictModalOpenRef.current) return; // 如果有拦截弹窗，忽略实时推送，防止覆盖本地数据
+  //       if (payload.eventType !== 'INSERT' && payload.eventType !== 'UPDATE') return;
+  //       const incoming = payload?.new?.data;
+  //       if (!isPlainObject(incoming)) return;
+  //       const incomingDeviceId = incoming?._syncMeta?.deviceId ? String(incoming._syncMeta.deviceId) : '';
+  //       if (incomingDeviceId && deviceIdRef.current && incomingDeviceId === deviceIdRef.current) return;
+  //       const incomingComparable = getComparablePayload(incoming);
+  //       if (!incomingComparable || incomingComparable === lastSyncedRef.current) return;
+  //       await applyCloudConfig(incoming, payload.new.updated_at);
+  //     })
+  //     .subscribe();
+  //   return () => {
+  //     supabase.removeChannel(channel);
+  //   };
+  // }, [user?.id]);
 
   // 登出
   const handleLogout = async () => {
@@ -3886,13 +3909,14 @@ export default function HomePage() {
         if (!data || !fundCodeStillInStorage(c)) return;
 
         const oldData = getStoredFundSnapshot(c);
-        // 如果估值接口本轮失败（回退到 fallback），说明盘中估值（gsz）获取失败。
-        // 为了防止前端估值变为空白，我们将本地旧数据的 gsz 等估值字段保留下来，但依然让最新的持仓和历史净值覆盖上去。
-        if (data.valuationSource === 'fallback' && oldData) {
+        // 估值查询失败或返回空 gsz 时复用本地上一轮有效估值，避免界面估清；持仓/净值仍用本轮接口结果。
+        const hasValidGsz = (row) => Number.isFinite(Number(row?.gsz));
+        if (oldData && !hasValidGsz(data) && hasValidGsz(oldData)) {
           data.gsz = oldData.gsz;
           data.gszzl = oldData.gszzl;
           data.gztime = oldData.gztime;
-          data.valuationSource = oldData.valuationSource; // 维持原有来源标识
+          if (oldData.valuationSource) data.valuationSource = oldData.valuationSource;
+          data.noValuation = false;
         }
 
         updated.push(data);
@@ -3955,6 +3979,7 @@ export default function HomePage() {
                 const gid = tx.groupId || null;
                 const txInScope = (scope === DAILY_EARNINGS_SCOPE_ALL) ? !gid : (gid === scope);
                 if (!txInScope) continue;
+                if (tx.isHistoryOnly) continue;
                 const s = Number(tx.share) || 0;
                 if (tx.type === 'buy') baseShare -= s;
                 else if (tx.type === 'sell') baseShare += s;
@@ -3997,6 +4022,10 @@ export default function HomePage() {
 
               const start = addDays(lastRecordedDate, 1);
               const navRows = await fetchFundNetValueRange(data.code, lastRecordedDate, latestNavDate);
+              if (Number.isFinite(latestNav) && latestNav > 0 && !navRows.some(r => r.date === latestNavDate)) {
+                navRows.push({ date: latestNavDate, nav: latestNav });
+                navRows.sort((a, b) => a.date.localeCompare(b.date));
+              }
               if (fundCodeStillInStorage(data.code)) {
                 for (const r of navRows) navCache.set(r.date, r.nav);
                 const firstIdx = navRows.findIndex((r) => r.date >= start);
@@ -5113,7 +5142,10 @@ export default function HomePage() {
   const collectLocalPayload = (keys = null) => {
     try {
       const all = {};
-      // 不包含 fundValuationTimeseries，该数据暂不同步到云端
+      // 不包含 fundValuationTimeseries（作为频繁更新数据，仅在全量同步或特定触发时同步，不加入实时同步键列表）
+      if (!keys || keys.has('fundValuationTimeseries')) {
+        all.fundValuationTimeseries = storageStore.getItem('fundValuationTimeseries', {});
+      }
       if (!keys || keys.has('funds')) {
         all.funds = storageStore.getItem('funds', []);
       }
@@ -5582,6 +5614,17 @@ export default function HomePage() {
       }, {});
       setFundDailyEarnings(nextFundDailyEarnings);
 
+      if (hasOwn(cloudData, 'fundValuationTimeseries')) {
+        const nextTimeseries = isPlainObject(cloudData.fundValuationTimeseries) ? cloudData.fundValuationTimeseries : {};
+        const cleanedTimeseries = {};
+        Object.keys(nextTimeseries).forEach(code => {
+          if (nextFundCodes.has(code) && Array.isArray(nextTimeseries[code])) {
+            cleanedTimeseries[code] = nextTimeseries[code];
+          }
+        });
+        storageStore.setItem('fundValuationTimeseries', JSON.stringify(cleanedTimeseries));
+      }
+
       if (isPlainObject(cloudData.customSettings)) {
         try {
           const merged = { ...(customSettings || {}), ...cloudData.customSettings };
@@ -5601,6 +5644,14 @@ export default function HomePage() {
             }
           }
         } catch { }
+      }
+
+      if (options.forceTakeover) {
+        // 在耗时的 refreshAll 之前先执行一次强制同步以夺回设备活跃锁，并弹出提示
+        const currentUserId = options.userId || userIdRef.current || user?.id;
+        if (currentUserId) {
+          await syncUserConfig(currentUserId, true, null, false, { forceTakeover: true });
+        }
       }
 
       if (nextFunds.length) {
@@ -5664,7 +5715,7 @@ export default function HomePage() {
 
       // 非冲突检查模式：直接复用上方查询到的 meta 数据，覆盖本地
       if (meta.data && isPlainObject(meta.data) && Object.keys(meta.data).length > 0) {
-        await applyCloudConfig(meta.data, meta.updated_at, options);
+        await applyCloudConfig(meta.data, meta.updated_at, { ...options, userId });
         return;
       }
 
@@ -6642,9 +6693,10 @@ export default function HomePage() {
               if (isMobile) {
                 setTutorialDrawerOpen(true);
               } else {
-                window.open('https://jcle26f8aw.feishu.cn/docx/Qis6d6ntFoaTOZxPVlUckVIpn8c', '_blank');
+                window.open('https://www.yuque.com/u267605/ookgim/im06q8tembbld6im?singleDoc', '_blank');
               }
             }}
+            onUpdateLog={() => setUpdateLogOpen(true)}
           />
         </div>
       </div>
@@ -7334,6 +7386,7 @@ export default function HomePage() {
               window.open('https://www.yuque.com/u267605/ookgim/im06q8tembbld6im?singleDoc', '_blank');
             }
           }}
+          onUpdateLog={() => setUpdateLogOpen(true)}
           onFeedback={() => {
             if (!user?.id) {
               sonnerToast.error('请先登录后再提交反馈');
@@ -7378,6 +7431,12 @@ export default function HomePage() {
       <AnimatePresence>
         {tutorialDrawerOpen && (
           <TutorialDrawer open onOpenChange={setTutorialDrawerOpen} />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {updateLogOpen && (
+          <UpdateLogModal open onOpenChange={setUpdateLogOpen} />
         )}
       </AnimatePresence>
 
@@ -7804,10 +7863,8 @@ export default function HomePage() {
               const { userId } = deviceConflictModal;
               setDeviceConflictModal({ ...deviceConflictModal, open: false });
               refreshCycleStartRef.current = Date.now();
-              // 1. 拉取云端最新数据覆盖本地，传入 forceTakeover 避免拉取后合并数据时触发逆向同步导致的异常拦截
+              // 1. 拉取云端最新数据覆盖本地，传入 forceTakeover 并在内部触发强制同步接管
               await fetchCloudConfig(userId, false, { forceTakeover: true });
-              // 2. 携带 forceTakeover 强制同步一次，夺回设备活跃锁
-              await syncUserConfig(userId, true, null, false, { forceTakeover: true });
             }}
             title="其它设备登录提示"
             message={deviceConflictModal.message}
