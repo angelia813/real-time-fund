@@ -24,6 +24,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { getTagThemeBadgeProps } from './AddTagDialog';
 import { cn } from '@/lib/utils';
+import { useStorageStore } from "@/app/stores";
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -52,7 +53,7 @@ const formatDisplayDate = (value) => {
 };
 
 export default function FundCard({
-  fund: f,
+  fundCode,
   isHoldingLinked = false,
   todayStr,
   currentTab,
@@ -84,10 +85,15 @@ export default function FundCard({
   fundTags = [],
   onFundTagsClick,
   fundExtraData,
+  onDataSourceClick,
 }) {
-  const holding = holdings[f?.code];
+  const {
+    funds,
+  } = useStorageStore();
+  const f = useMemo(() => funds?.find((item) => item.code === fundCode), [funds, fundCode]);
+  const holding = holdings?.[f?.code];
   const profit = getHoldingProfit?.(f, holding) ?? null;
-  const hasHoldings = f.holdingsIsLastQuarter && Array.isArray(f.holdings) && f.holdings.length > 0;
+  const hasHoldings = f?.holdingsIsLastQuarter && Array.isArray(f?.holdings) && f?.holdings.length > 0;
   // “我的收益”(每日收益)只依赖份额；成本价缺失也应可展示
   const hasHoldingShare =
     holding &&
@@ -113,6 +119,8 @@ export default function FundCard({
     if (!hasHoldingShare) return [];
     return dailyEarningsSeries;
   }, [dailyEarningsSeries, hasHoldingShare]);
+
+  if (!f) return null;
 
   const showFavoriteButton = currentTab === 'all' || currentTab === 'fav';
   const relatedSectorRaw = f?.relatedSector != null ? String(f.relatedSector).trim() : '';
@@ -146,8 +154,8 @@ export default function FundCard({
         ...style,
       }}
     >
-      <div className="row" style={{ marginBottom: 10 }}>
-        <div className="title">
+      <div className="row" style={{ marginBottom: 10, alignItems: 'center', flexWrap: 'nowrap', alignContent: 'center' }}>
+        <div className="title" style={{ flex: '1 1 auto', minWidth: 0 }}>
           {showFavoriteButton ? (
             <button
               className={`icon-button fav-button ${favorites?.has(f.code) ? 'active' : ''}`}
@@ -160,7 +168,7 @@ export default function FundCard({
               <StarIcon width="18" height="18" filled={favorites?.has(f.code)} />
             </button>
           ) : null}
-          <div className="title-text">
+          <div className="title-text" style={{ minWidth: 0 }}>
             <span
               className="name-text"
               title={f.jzrq === todayStr ? '今日净值已更新' : ''}
@@ -232,7 +240,16 @@ export default function FundCard({
           </div>
         </div>
 
-        <div className="actions">
+        <div className="actions" style={{ flex: '0 0 auto', flexWrap: 'nowrap', alignSelf: 'center', marginLeft: 'auto' }}>
+          <div
+            className="badge-v"
+            style={{ cursor: 'pointer', background: 'var(--primary-light, rgba(34, 211, 238, 0.1))', color: 'var(--primary)' }}
+            onClick={() => onDataSourceClick?.(f)}
+            title="点击切换估值数据源"
+          >
+            <span>数据源</span>
+            <strong>{f.dataSource || 1}</strong>
+          </div>
           <div className="badge-v">
             <span>{f.noValuation ? '净值日期' : '估值时间'}</span>
             <strong>
@@ -308,19 +325,17 @@ export default function FundCard({
             <Stat
               label="估值净值"
               value={
-                f.estPricedCoverage > 0.05 ? f.estGsz.toFixed(4) : (f.gsz ?? '—')
+                f.gsz ?? '—'
               }
             />
             <Stat
               label="估算涨幅"
               value={
-                f.estPricedCoverage > 0.05
-                  ? `${f.estGszzl > 0 ? '+' : ''}${f.estGszzl.toFixed(2)}%`
-                  : isNumber(f.gszzl)
-                    ? `${f.gszzl > 0 ? '+' : ''}${f.gszzl.toFixed(2)}%`
-                    : f.gszzl ?? '—'
+                isNumber(f.gszzl)
+                  ? `${f.gszzl > 0 ? '+' : ''}${f.gszzl.toFixed(2)}%`
+                  : f.gszzl ?? '—'
               }
-              delta={f.estPricedCoverage > 0.05 ? f.estGszzl : Number(f.gszzl) || 0}
+              delta={Number(f.gszzl) || 0}
             />
           </>
         )}
@@ -509,23 +524,9 @@ export default function FundCard({
         )}
       </div>
 
-      {f.estPricedCoverage > 0.05 && (
-        <div
-          style={{
-            fontSize: '10px',
-            color: 'var(--muted)',
-            marginTop: -8,
-            marginBottom: 10,
-            textAlign: 'right',
-          }}
-        >
-          基于 {Math.round(f.estPricedCoverage * 100)}% 持仓估算
-        </div>
-      )}
-
       {(() => {
         const showIntraday =
-          Array.isArray(valuationSeries?.[f.code]) && valuationSeries[f.code].length >= 2;
+          !f.noValuation && Array.isArray(valuationSeries?.[f.code]) && valuationSeries[f.code].length >= 2;
         if (!showIntraday) return null;
 
         if (
@@ -543,11 +544,13 @@ export default function FundCard({
           return null;
         }
 
+        // 以最新收盘净值为基准，与估算涨幅 gszzl 保持一致
+        const dwjz = f.dwjz != null ? Number(f.dwjz) : null;
         return (
           <FundIntradayChart
             key={`${f.code}-intraday-${theme}`}
             series={valuationSeries[f.code]}
-            referenceNav={f.dwjz != null ? Number(f.dwjz) : undefined}
+            referenceNav={dwjz != null && Number.isFinite(dwjz) ? dwjz : undefined}
             theme={theme}
           />
         );
