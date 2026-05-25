@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { storageStore } from '../stores';
 
-const ANNOUNCEMENT_KEY = 'hasClosedAnnouncement_v1.5.0';
+const ANNOUNCEMENT_KEY = 'hasClosedAnnouncement_v1.5.3';
 
 export default function Announcement() {
   const [isVisible, setIsVisible] = useState(false);
@@ -77,14 +77,13 @@ export default function Announcement() {
               </svg>
               <span>公告</span>
             </div>
-            <div style={{ color: 'var(--text)', lineHeight: '1.6', fontSize: '15px', overflowY: 'auto', minHeight: 0, flex: 1, paddingRight: '4px' }}>
-              <p>v1.5.0 更新内容如下：</p>
-              <p>1. 新增白屏监控，程序报错自动上报。</p>
-              <p>2. 修复持仓份额存储精度问题。</p>
-              <p>3. 修复折线图快速点击引起的报错。</p>
-              <p>4. 重新调整我的收益计算方式。</p>
+            <div className="scrollbar-y-styled" style={{ color: 'var(--text)', lineHeight: '1.6', fontSize: '15px', overflowY: 'auto', minHeight: 0, flex: 1, paddingRight: '4px' }}>
+              <p>v1.5.3 更新内容如下：</p>
+              <p>1. 全局设置新增“减少动态样式效果”选项。</p>
+              <p>2. 调整搜索交互体验。</p>
+              <p>3. 优化表格渲染性能。</p>
+              <p>4. PC容器宽度个性化最大范围调整为屏幕宽度。</p>
             </div>
-
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '8px' }}>
               <button
                 className="button"

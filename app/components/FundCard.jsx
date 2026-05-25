@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
@@ -25,6 +25,7 @@ import { Badge } from '@/components/ui/badge';
 import { getTagThemeBadgeProps } from './AddTagDialog';
 import { cn } from '@/lib/utils';
 import { useStorageStore } from "@/app/stores";
+import { fetchFundHoldings } from '@/app/api/fund';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -47,9 +48,12 @@ const formatDisplayDate = (value) => {
   const d = toTz(value);
   if (!d.isValid()) return value;
 
-  const hasTime = /[T\s]\d{2}:\d{2}/.test(String(value));
+  // 如果是数字（时间戳）或者字符串中包含显式的时间模式，则展示时分
+  const isTimestamp = typeof value === 'number' || (typeof value === 'string' && /^\d{10,13}$/.test(value));
+  const hasTimePattern = /[T\s]\d{1,2}:\d{2}/.test(String(value));
+  const showTime = isTimestamp || hasTimePattern;
 
-  return hasTime ? d.format('MM-DD HH:mm') : d.format('MM-DD');
+  return showTime ? d.format('MM-DD HH:mm') : d.format('MM-DD');
 };
 
 export default function FundCard({
@@ -89,11 +93,43 @@ export default function FundCard({
 }) {
   const {
     funds,
+    refreshMs,
   } = useStorageStore();
   const f = useMemo(() => funds?.find((item) => item.code === fundCode), [funds, fundCode]);
+
+  const [topHoldings, setTopHoldings] = useState({ holdings: [], holdingsReportDate: null, holdingsIsLastQuarter: false });
+
+  useEffect(() => {
+    let timer;
+    let cancelled = false;
+    const fetchHoldings = async () => {
+      try {
+        const res = await fetchFundHoldings(fundCode);
+        if (!cancelled) {
+          setTopHoldings(res);
+        }
+      } catch (e) {
+        console.error('fetchFundHoldings error', e);
+      }
+    };
+    fetchHoldings();
+    const tick = () => {
+      timer = setTimeout(() => {
+        if (!cancelled) {
+          fetchHoldings().finally(tick);
+        }
+      }, refreshMs || 30000);
+    };
+    tick();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [fundCode, refreshMs]);
+
   const holding = holdings?.[f?.code];
   const profit = getHoldingProfit?.(f, holding) ?? null;
-  const hasHoldings = f?.holdingsIsLastQuarter && Array.isArray(f?.holdings) && f?.holdings.length > 0;
+  const hasHoldings = topHoldings.holdingsIsLastQuarter && Array.isArray(topHoldings.holdings) && topHoldings.holdings.length > 0;
   // “我的收益”(每日收益)只依赖份额；成本价缺失也应可展示
   const hasHoldingShare =
     holding &&
@@ -277,7 +313,14 @@ export default function FundCard({
       </div>
 
       <div className="row" style={{ marginBottom: 12 }}>
-        <Stat label="单位净值" value={f.dwjz ?? '—'} />
+        <Stat
+          label="最新净值"
+          value={
+            f.dwjz != null && !isNaN(Number(f.dwjz))
+              ? Number(f.dwjz).toFixed(4)
+              : (f.dwjz ?? '—')
+          }
+        />
         {f.noValuation ? (
           <Stat
             label="涨跌幅"
@@ -325,7 +368,9 @@ export default function FundCard({
             <Stat
               label="估值净值"
               value={
-                f.gsz ?? '—'
+                f.gsz != null && !isNaN(Number(f.gsz))
+                  ? Number(f.gsz).toFixed(4)
+                  : (f.gsz ?? '—')
               }
             />
             <Stat
@@ -526,7 +571,7 @@ export default function FundCard({
 
       {(() => {
         const showIntraday =
-          !f.noValuation && Array.isArray(valuationSeries?.[f.code]) && valuationSeries[f.code].length >= 2;
+          !f.noValuation && Array.isArray(valuationSeries?.[f.code]) && valuationSeries[f.code].length >= 1;
         if (!showIntraday) return null;
 
         if (
@@ -552,6 +597,10 @@ export default function FundCard({
             series={valuationSeries[f.code]}
             referenceNav={dwjz != null && Number.isFinite(dwjz) ? dwjz : undefined}
             theme={theme}
+            fundCode={f.code}
+            valuationSource={f.valuationSource}
+            gztime={f.gztime}
+            todayStr={todayStr}
           />
         );
       })()}
@@ -590,7 +639,7 @@ export default function FundCard({
                 <span className="muted">涨跌幅 / 占比</span>
               </div>
               <div className="list">
-                {f.holdings.map((h, idx) => (
+                {topHoldings.holdings.map((h, idx) => (
                   <div className="item" key={idx}>
                     <span className="name">{h.name}</span>
                     <div className="values">
@@ -674,7 +723,7 @@ export default function FundCard({
                     style={{ overflow: 'hidden' }}
                   >
                     <div className="list">
-                      {f.holdings.map((h, idx) => (
+                      {topHoldings.holdings.map((h, idx) => (
                         <div className="item" key={idx}>
                           <span className="name">{h.name}</span>
                           <div className="values">
