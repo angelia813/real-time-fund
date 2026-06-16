@@ -12,13 +12,13 @@ import {
   useState,
   memo
 } from 'react';
-import { throttle } from 'lodash';
+import { isArray, isFunction, isObject, isString, throttle } from 'lodash';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useModalStore } from '../stores';
 import { useWindowVirtualizer } from '@tanstack/react-virtual';
 import { flexRender, getCoreRowModel, useReactTable } from '@tanstack/react-table';
 import { DndContext, KeyboardSensor, PointerSensor, useSensor, useSensors, closestCenter } from '@dnd-kit/core';
-import { restrictToVerticalAxis, restrictToParentElement } from '@dnd-kit/modifiers';
+import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import ConfirmModal from './ConfirmModal';
@@ -276,6 +276,7 @@ const FundNameCell = memo(
     const code = original.code;
     const isUpdated = original.isUpdated;
     const hasDca = original.hasDca;
+    const hasPending = original.hasPending;
     const isFavorites = favorites?.has?.(code);
     const rowContext = useContext(SortableRowContext);
     const showFavoriteButton = !isGroupTab && (currentTab === 'all' || currentTab === 'fav' || !currentTab);
@@ -447,6 +448,7 @@ const FundNameCell = memo(
           {code ? (
             <span className="muted code-text">
               #{code}
+              {hasPending && <span className="pending-indicator">待</span>}
               {hasDca && <span className="dca-indicator">定</span>}
               {isUpdated && <span className="updated-indicator">✓</span>}
             </span>
@@ -490,7 +492,7 @@ FundNameCell.displayName = 'FundNameCell';
  * @param {string} [props.relatedSectorSessionKey] - 登录用户 id（未登录传空），用于关联板块查询缓存与登录后重新拉取
  * @param {(row: any) => void} [props.onFundTagsClick] - 点击标签列时打开编辑标签
  */
-export default function PcFundTable({
+const PcFundTable = memo(function PcFundTable({
   data = [],
   onRemoveFund,
   onRemoveFunds,
@@ -586,7 +588,7 @@ export default function PcFundTable({
     const baseOptions = [
       { id: 'all', name: '全部', description: '全部分组' },
       { id: 'fav', name: '自选', description: '自选分组' },
-      ...(Array.isArray(groups) ? groups : []).map((group) => ({
+      ...(isArray(groups) ? groups : []).map((group) => ({
         id: group?.id,
         name: group?.name || '未命名',
         description: '自定义分组'
@@ -604,11 +606,11 @@ export default function PcFundTable({
   const isGroupTab = currentTab && currentTab !== 'all' && currentTab !== 'fav';
   // 批量删除：之前仅自定义分组支持，这里扩展到「全部 / 自选 / 自定义分组」
   const batchRemoveEnabled = currentTab === 'all' || currentTab === 'fav' || isGroupTab;
-  const selectableCodes = useMemo(() => (Array.isArray(data) ? data.map((d) => d?.code).filter(Boolean) : []), [data]);
+  const selectableCodes = useMemo(() => (isArray(data) ? data.map((d) => d?.code).filter(Boolean) : []), [data]);
   /** 全部/自选下「关联汇总持仓」行不参与批量选择 */
   const batchSelectableCodes = useMemo(
     () =>
-      Array.isArray(data)
+      isArray(data)
         ? data
             .filter((d) => !d?.isHoldingLinked)
             .map((d) => d?.code)
@@ -645,7 +647,7 @@ export default function PcFundTable({
 
   useEffect(() => {
     const linkedCodes = new Set(
-      (Array.isArray(data) ? data : []).filter((d) => d && d.isHoldingLinked && d.code).map((d) => d.code)
+      (isArray(data) ? data : []).filter((d) => d && d.isHoldingLinked && d.code).map((d) => d.code)
     );
     if (!linkedCodes.size) return;
     setSelectedCodes((prev) => {
@@ -673,7 +675,7 @@ export default function PcFundTable({
   const toggleSelected = useCallback(
     (code, checked) => {
       if (!code) return;
-      const row = Array.isArray(data) ? data.find((d) => d?.code === code) : null;
+      const row = isArray(data) ? data.find((d) => d?.code === code) : null;
       if (row?.isHoldingLinked) return;
       setSelectedCodes((prev) => {
         const next = new Set(prev || []);
@@ -702,7 +704,7 @@ export default function PcFundTable({
     if (typeof window === 'undefined') return {};
     try {
       const parsed = storageStore.getItem('customSettings') || {};
-      if (!parsed || typeof parsed !== 'object') return {};
+      if (!parsed || !isObject(parsed)) return {};
       if (
         parsed.pcTableColumnOrder != null ||
         parsed.pcTableColumnVisibility != null ||
@@ -711,7 +713,7 @@ export default function PcFundTable({
         parsed.mobileTableColumnVisibility != null
       ) {
         const all = {
-          ...(parsed.all && typeof parsed.all === 'object' ? parsed.all : {}),
+          ...(parsed.all && isObject(parsed.all) ? parsed.all : {}),
           pcTableColumnOrder: parsed.pcTableColumnOrder,
           pcTableColumnVisibility: parsed.pcTableColumnVisibility,
           pcTableColumns: parsed.pcTableColumns,
@@ -733,10 +735,10 @@ export default function PcFundTable({
   };
 
   const buildPcConfigFromGroup = (group) => {
-    if (!group || typeof group !== 'object') return null;
+    if (!group || !isObject(group)) return null;
     const sizing = group.pcTableColumns;
     const sizingObj =
-      sizing && typeof sizing === 'object'
+      sizing && isObject(sizing)
         ? Object.fromEntries(Object.entries(sizing).filter(([, v]) => Number.isFinite(v)))
         : {};
     if (sizingObj.actions) {
@@ -745,12 +747,10 @@ export default function PcFundTable({
       delete sizingObj.actions;
     }
     const order =
-      Array.isArray(group.pcTableColumnOrder) && group.pcTableColumnOrder.length > 0 ? group.pcTableColumnOrder : null;
+      isArray(group.pcTableColumnOrder) && group.pcTableColumnOrder.length > 0 ? group.pcTableColumnOrder : null;
     const visibility =
-      group.pcTableColumnVisibility && typeof group.pcTableColumnVisibility === 'object'
-        ? group.pcTableColumnVisibility
-        : null;
-    const pinned = Array.isArray(group.pcTableColumnPinned) ? group.pcTableColumnPinned : [];
+      group.pcTableColumnVisibility && isObject(group.pcTableColumnVisibility) ? group.pcTableColumnVisibility : null;
+    const pinned = isArray(group.pcTableColumnPinned) ? group.pcTableColumnPinned : [];
     return { sizing: sizingObj, order, visibility, pinned };
   };
 
@@ -794,14 +794,14 @@ export default function PcFundTable({
   const defaultPc = getDefaultPcGroupConfig();
   const columnOrder = (() => {
     const order = currentGroupPc?.pcTableColumnOrder ?? defaultPc.order;
-    if (!Array.isArray(order) || order.length === 0) return [...NON_FROZEN_COLUMN_IDS];
+    if (!isArray(order) || order.length === 0) return [...NON_FROZEN_COLUMN_IDS];
     const valid = order.filter((id) => NON_FROZEN_COLUMN_IDS.includes(id));
     const missing = NON_FROZEN_COLUMN_IDS.filter((id) => !valid.includes(id));
     return [...valid, ...missing];
   })();
   const columnVisibility = (() => {
     const vis = currentGroupPc?.pcTableColumnVisibility ?? null;
-    if (vis && typeof vis === 'object' && Object.keys(vis).length > 0) {
+    if (vis && isObject(vis) && Object.keys(vis).length > 0) {
       const next = { ...vis };
       NON_FROZEN_COLUMN_IDS.forEach((id) => {
         if (next[id] === undefined) {
@@ -818,7 +818,7 @@ export default function PcFundTable({
   })();
   const columnSizing = (() => {
     const s = currentGroupPc?.pcTableColumns;
-    if (s && typeof s === 'object') {
+    if (s && isObject(s)) {
       const out = Object.fromEntries(Object.entries(s).filter(([, v]) => Number.isFinite(v)));
       if (out.actions) {
         const { actions, ...rest } = out;
@@ -833,7 +833,7 @@ export default function PcFundTable({
     if (typeof window === 'undefined') return;
     try {
       const parsed = storageStore.getItem('customSettings') || {};
-      const group = parsed[groupKey] && typeof parsed[groupKey] === 'object' ? { ...parsed[groupKey] } : {};
+      const group = parsed[groupKey] && isObject(parsed[groupKey]) ? { ...parsed[groupKey] } : {};
       if (updates.pcTableColumnOrder !== undefined) group.pcTableColumnOrder = updates.pcTableColumnOrder;
       if (updates.pcTableColumnVisibility !== undefined)
         group.pcTableColumnVisibility = updates.pcTableColumnVisibility;
@@ -865,7 +865,7 @@ export default function PcFundTable({
       const targetUpdates = {};
       targetIds.forEach((targetId) => {
         if (!targetId || targetId === groupKey) return;
-        const group = parsed[targetId] && typeof parsed[targetId] === 'object' ? { ...parsed[targetId] } : {};
+        const group = parsed[targetId] && isObject(parsed[targetId]) ? { ...parsed[targetId] } : {};
         parsed[targetId] = { ...group, ...payload };
         targetUpdates[targetId] = payload;
       });
@@ -887,15 +887,15 @@ export default function PcFundTable({
   };
 
   const setColumnOrder = (nextOrderOrUpdater) => {
-    const next = typeof nextOrderOrUpdater === 'function' ? nextOrderOrUpdater(columnOrder) : nextOrderOrUpdater;
+    const next = isFunction(nextOrderOrUpdater) ? nextOrderOrUpdater(columnOrder) : nextOrderOrUpdater;
     persistPcGroupConfig({ pcTableColumnOrder: next });
   };
   const setColumnVisibility = (nextOrUpdater) => {
-    const next = typeof nextOrUpdater === 'function' ? nextOrUpdater(columnVisibility) : nextOrUpdater;
+    const next = isFunction(nextOrUpdater) ? nextOrUpdater(columnVisibility) : nextOrUpdater;
     persistPcGroupConfig({ pcTableColumnVisibility: next });
   };
   const setColumnSizing = (nextOrUpdater) => {
-    const next = typeof nextOrUpdater === 'function' ? nextOrUpdater(columnSizing) : nextOrUpdater;
+    const next = isFunction(nextOrUpdater) ? nextOrUpdater(columnSizing) : nextOrUpdater;
     const { actions, ...rest } = next || {};
     persistPcGroupConfig({ pcTableColumns: rest || {} });
   };
@@ -1340,34 +1340,39 @@ export default function PcFundTable({
           return (
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <span>基金名称</span>
-              <button
-                type="button"
-                className="icon-button"
-                onClick={(e) => {
-                  e.stopPropagation?.();
-                  setIsEditMode(true);
-                }}
-                aria-label="编辑"
-                style={{
-                  border: 'none',
-                  width: '28px',
-                  height: '28px',
-                  minWidth: '28px',
-                  backgroundColor: 'transparent',
-                  color: 'var(--text)',
-                  flexShrink: 0,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  cursor: 'pointer',
-                  opacity: 0.6,
-                  transition: 'opacity 0.2s'
-                }}
-                onMouseEnter={(e) => (e.currentTarget.style.opacity = 1)}
-                onMouseLeave={(e) => (e.currentTarget.style.opacity = 0.6)}
-              >
-                <PencilIcon width="14" height="14" />
-              </button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    className="icon-button"
+                    onClick={(e) => {
+                      e.stopPropagation?.();
+                      setIsEditMode(true);
+                    }}
+                    aria-label="编辑"
+                    style={{
+                      border: 'none',
+                      width: '28px',
+                      height: '28px',
+                      minWidth: '28px',
+                      backgroundColor: 'transparent',
+                      color: 'var(--text)',
+                      flexShrink: 0,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: 'pointer',
+                      opacity: 0.6,
+                      transition: 'opacity 0.2s'
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.opacity = 1)}
+                    onMouseLeave={(e) => (e.currentTarget.style.opacity = 0.6)}
+                  >
+                    <PencilIcon width="14" height="14" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>编辑模式</TooltipContent>
+              </Tooltip>
             </div>
           );
         },
@@ -1400,7 +1405,7 @@ export default function PcFundTable({
         minSize: 96,
         cell: (info) => {
           const original = info.row.original || {};
-          const list = Array.isArray(original.fundTags) ? original.fundTags : [];
+          const list = isArray(original.fundTags) ? original.fundTags : [];
           const hasTags = list.length > 0;
           return (
             <button
@@ -1432,7 +1437,7 @@ export default function PcFundTable({
                 >
                   {list.map((raw, idx) => {
                     const item =
-                      raw && typeof raw === 'object' && raw.name != null
+                      raw && isObject(raw) && raw.name != null
                         ? {
                             name: String(raw.name).trim(),
                             theme: String(raw.theme ?? 'default').trim() || 'default'
@@ -1684,7 +1689,7 @@ export default function PcFundTable({
         cell: (info) => {
           const original = info.row.original || {};
           const rawDate = original.latestNavDate ?? '-';
-          const date = typeof rawDate === 'string' && rawDate.length > 5 ? rawDate.slice(5) : rawDate;
+          const date = isString(rawDate) && rawDate.length > 5 ? rawDate.slice(5) : rawDate;
           return (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0 }}>
               <div
@@ -1717,7 +1722,7 @@ export default function PcFundTable({
         cell: (info) => {
           const original = info.row.original || {};
           const rawDate = original.estimateNavDate ?? '-';
-          const date = typeof rawDate === 'string' && rawDate.length > 5 ? rawDate.slice(5) : rawDate;
+          const date = isString(rawDate) && rawDate.length > 5 ? rawDate.slice(5) : rawDate;
           const estimateNav = info.getValue();
           const hasEstimateNav = estimateNav != null && estimateNav !== '—';
           return (
@@ -1755,7 +1760,7 @@ export default function PcFundTable({
           const original = info.row.original || {};
           const value = original.yesterdayChangeValue;
           const rawDate = original.yesterdayDate ?? '-';
-          const date = typeof rawDate === 'string' && rawDate.length > 5 ? rawDate.slice(5) : rawDate;
+          const date = isString(rawDate) && rawDate.length > 5 ? rawDate.slice(5) : rawDate;
           const cls = value > 0 ? 'up' : value < 0 ? 'down' : '';
           return (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0 }}>
@@ -1792,7 +1797,7 @@ export default function PcFundTable({
           const value = original.estimateChangeValue;
           const isMuted = original.estimateChangeMuted;
           const rawTime = original.estimateTime ?? '-';
-          const time = typeof rawTime === 'string' && rawTime.length > 5 ? rawTime.slice(5) : rawTime;
+          const time = isString(rawTime) && rawTime.length > 5 ? rawTime.slice(5) : rawTime;
           const cls = isMuted ? 'muted' : value > 0 ? 'up' : value < 0 ? 'down' : '';
           const text = info.getValue();
           const hasText = text != null && text !== '—';
@@ -2399,7 +2404,7 @@ export default function PcFundTable({
     columnResizeMode: 'onChange',
     onColumnSizingChange: (updater) => {
       setColumnSizing((prev) => {
-        const next = typeof updater === 'function' ? updater(prev) : updater;
+        const next = isFunction(updater) ? updater(prev) : updater;
         const { actions, ...rest } = next || {};
         return rest || {};
       });
@@ -2726,7 +2731,7 @@ export default function PcFundTable({
               onDragStart={handleDragStart}
               onDragEnd={handleDragEnd}
               onDragCancel={handleDragCancel}
-              modifiers={[restrictToVerticalAxis, restrictToParentElement]}
+              modifiers={[restrictToVerticalAxis]}
               dropAnimation={null}
               autoScroll={false}
             >
@@ -2795,7 +2800,7 @@ export default function PcFundTable({
               onDragStart={handleDragStart}
               onDragEnd={handleDragEnd}
               onDragCancel={handleDragCancel}
-              modifiers={[restrictToVerticalAxis, restrictToParentElement]}
+              modifiers={[restrictToVerticalAxis]}
               dropAnimation={null}
               autoScroll={false}
             >
@@ -3001,15 +3006,32 @@ export default function PcFundTable({
       </>
     </EditModeContext.Provider>
   );
-}
+});
 
 function FundDetailDialog({ blockDialogClose, cardDialogRow, getFundCardProps, setCardDialogRow }) {
+  const isAnySubModalOpen = useModalStore(
+    (s) =>
+      s.dataSourceModal.open ||
+      s.tradeModal.open ||
+      s.holdingModal.open ||
+      s.dcaModal.open ||
+      s.dividendMethodModal.open ||
+      s.convertModal.open ||
+      s.fundTagsEdit.open ||
+      s.historyModal.open ||
+      s.actionModal.open ||
+      s.selectHoldingGroupModal.open ||
+      s.addHistoryModal.open
+  );
+
+  const finalBlockClose = blockDialogClose || isAnySubModalOpen;
+
   return (
     <Dialog
       open
       onOpenChange={(open) => {
         if (!open && document.body.hasAttribute('data-photo-viewer-open')) return;
-        if (!open && !blockDialogClose) setCardDialogRow(null);
+        if (!open && !finalBlockClose) setCardDialogRow(null);
       }}
     >
       <DialogContent
@@ -3019,7 +3041,7 @@ function FundDetailDialog({ blockDialogClose, cardDialogRow, getFundCardProps, s
             e.preventDefault();
             return;
           }
-          if (blockDialogClose) e.preventDefault();
+          if (finalBlockClose) e.preventDefault();
         }}
         onEscapeKeyDown={(e) => {
           if (document.body.hasAttribute('data-photo-viewer-open')) {
@@ -3176,3 +3198,5 @@ function BatchRemoveHeader({
     </div>
   );
 }
+
+export default PcFundTable;

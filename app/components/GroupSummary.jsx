@@ -1,10 +1,12 @@
 'use client';
+import { isBoolean, isNumber, isObject } from 'lodash';
 
-import { useEffect, useRef, useState, useMemo, useLayoutEffect } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import { useIsMobile } from '@/app/hooks/useIsMobile';
 import { PinIcon, PinOffIcon, EyeIcon, EyeOffIcon, SwitchIcon } from './Icons';
 import FitText from './FitText';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
+import { formatMoney } from '@/lib/utils';
 
 import { SUMMARY_TAB_ID } from '@/app/constants';
 
@@ -68,8 +70,8 @@ function CountUp({
     };
   }, [value]);
 
-  const text = `${prefix}${Math.abs(displayValue).toLocaleString('zh-CN', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}${suffix}`;
-  const styleFontSize = typeof style.fontSize === 'number' ? style.fontSize : parseFloat(style.fontSize);
+  const text = `${prefix}${formatMoney(Math.abs(displayValue), decimals)}${suffix}`;
+  const styleFontSize = isNumber(style.fontSize) ? style.fontSize : parseFloat(style.fontSize);
   const resolvedMaxFontSize = maxFontSize ?? (Number.isFinite(styleFontSize) ? styleFontSize : undefined);
 
   return (
@@ -101,12 +103,11 @@ export default function GroupSummary({
   const [showTodayPercent, setShowTodayPercent] = useState(false);
   const [isMasked, setIsMasked] = useState(masked ?? false);
   const [isAssetMasked, setIsAssetMasked] = useState(false);
-  const rowRef = useRef(null);
-  const [assetSize, setAssetSize] = useState(26);
-  const [metricSize, setMetricSize] = useState(20);
+  const assetSize = 26;
+  const metricSize = 20;
 
   useEffect(() => {
-    if (typeof masked === 'boolean') {
+    if (isBoolean(masked)) {
       setIsMasked(masked);
     }
   }, [masked]);
@@ -142,7 +143,7 @@ export default function GroupSummary({
         }
         if (profit.profitTotal !== null) {
           totalHoldingReturn += profit.profitTotal;
-          if (holding && typeof holding.cost === 'number' && typeof holding.share === 'number') {
+          if (holding && isNumber(holding.cost) && isNumber(holding.share)) {
             totalCost += holding.cost * holding.share;
           }
         }
@@ -167,7 +168,7 @@ export default function GroupSummary({
   }, [funds, holdings, getProfit]);
 
   const summary =
-    summaryTotalsOverride != null && typeof summaryTotalsOverride === 'object'
+    summaryTotalsOverride != null && isObject(summaryTotalsOverride)
       ? {
           totalAsset: summaryTotalsOverride.totalAsset,
           totalProfitToday: summaryTotalsOverride.totalProfitToday,
@@ -178,25 +179,6 @@ export default function GroupSummary({
           hasAnyTodayData: summaryTotalsOverride.hasAnyTodayData
         }
       : derivedSummary;
-
-  useLayoutEffect(() => {
-    const el = rowRef.current;
-    if (!el) return;
-    const height = el.clientHeight;
-    const tooTall = height > 80;
-    if (tooTall) {
-      setAssetSize((s) => Math.max(16, s - 1));
-      setMetricSize((s) => Math.max(12, s - 1));
-    }
-  }, [
-    summary.totalAsset,
-    summary.totalProfitToday,
-    summary.totalHoldingReturn,
-    summary.returnRate,
-    showPercent,
-    assetSize,
-    metricSize
-  ]);
 
   const style = useMemo(() => {
     const style = {};
@@ -243,11 +225,7 @@ export default function GroupSummary({
         >
           {isSticky ? <PinIcon width="14" height="14" /> : <PinOffIcon width="14" height="14" />}
         </span>
-        <div
-          ref={rowRef}
-          className="row"
-          style={{ alignItems: 'flex-end', justifyContent: 'space-between', minWidth: 0 }}
-        >
+        <div className="row" style={{ alignItems: 'flex-end', justifyContent: 'space-between', minWidth: 0 }}>
           <div style={{ flex: 4, minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
               <div className="muted" style={{ fontSize: '12px' }} key={portfolioTabId}>
@@ -287,13 +265,14 @@ export default function GroupSummary({
                 fontWeight: 700,
                 fontFamily: 'var(--font-mono)',
                 minWidth: 0,
-                cursor: 'pointer'
+                cursor: 'pointer',
+                overflow: 'hidden'
               }}
               onClick={() => setIsAssetMasked((v) => !v)}
             >
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <span style={{ display: 'inline-block' }}>
+                  <div style={{ display: 'block', width: '100%' }}>
                     {isMasked || isAssetMasked ? (
                       <span className="mask-text" style={{ fontSize: assetSize, position: 'relative', top: 4 }}>
                         ******
@@ -301,7 +280,7 @@ export default function GroupSummary({
                     ) : (
                       <CountUp value={summary.totalAsset} maxFontSize={assetSize} minFontSize={16} as="div" />
                     )}
-                  </span>
+                  </div>
                 </TooltipTrigger>
                 <TooltipContent>
                   <p>{isMasked || isAssetMasked ? '点击显示资产金额' : '点击隐藏资产金额'}</p>
@@ -338,14 +317,15 @@ export default function GroupSummary({
                   fontSize: '18px',
                   fontWeight: 700,
                   fontFamily: 'var(--font-mono)',
-                  cursor: summary.hasAnyTodayData ? 'pointer' : 'default'
+                  cursor: summary.hasAnyTodayData ? 'pointer' : 'default',
+                  overflow: 'hidden'
                 }}
                 onClick={() => summary.hasAnyTodayData && setShowTodayPercent(!showTodayPercent)}
               >
                 {summary.hasAnyTodayData ? (
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <span style={{ display: 'inline-block' }}>
+                      <div style={{ display: 'block', width: '100%' }}>
                         {isMasked ? (
                           <span className="mask-text" style={{ fontSize: metricSize }}>
                             ******
@@ -357,7 +337,10 @@ export default function GroupSummary({
                                 value={Math.abs(summary.todayReturnRate)}
                                 prefix={todayProfitPrefix}
                                 suffix="%"
-                                style={{ fontSize: metricSize }}
+                                maxFontSize={metricSize}
+                                minFontSize={12}
+                                as="div"
+                                style={{ textAlign: 'right' }}
                               />
                             ) : (
                               <CountUp
@@ -371,7 +354,7 @@ export default function GroupSummary({
                             )}
                           </>
                         )}
-                      </span>
+                      </div>
                     </TooltipTrigger>
                     <TooltipContent>
                       <p>点击切换金额/百分比</p>
@@ -402,13 +385,14 @@ export default function GroupSummary({
                   fontSize: '18px',
                   fontWeight: 700,
                   fontFamily: 'var(--font-mono)',
-                  cursor: 'pointer'
+                  cursor: 'pointer',
+                  overflow: 'hidden'
                 }}
                 onClick={() => setShowPercent(!showPercent)}
               >
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <span style={{ display: 'inline-block' }}>
+                    <div style={{ display: 'block', width: '100%' }}>
                       {isMasked ? (
                         <span className="mask-text" style={{ fontSize: metricSize }}>
                           ******
@@ -420,7 +404,10 @@ export default function GroupSummary({
                               value={Math.abs(summary.returnRate)}
                               prefix={holdingReturnPrefix}
                               suffix="%"
-                              style={{ fontSize: metricSize }}
+                              maxFontSize={metricSize}
+                              minFontSize={12}
+                              as="div"
+                              style={{ textAlign: 'right' }}
                             />
                           ) : (
                             <CountUp
@@ -433,7 +420,7 @@ export default function GroupSummary({
                           )}
                         </>
                       )}
-                    </span>
+                    </div>
                   </TooltipTrigger>
                   <TooltipContent>
                     <p>点击切换金额/百分比</p>

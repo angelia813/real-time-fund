@@ -31,16 +31,37 @@ import FundCard from './FundCard';
 import { Spinner } from '@/components/ui/spinner';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Pagination, PaginationContent, PaginationItem, PaginationLink } from '@/components/ui/pagination';
 
 function FundDetailDialog({ cardDialogRow, getFundCardProps, setCardDialogRow }) {
+  const isAnySubModalOpen = useModalStore(
+    (s) =>
+      s.dataSourceModal.open ||
+      s.tradeModal.open ||
+      s.holdingModal.open ||
+      s.dcaModal.open ||
+      s.dividendMethodModal.open ||
+      s.convertModal.open ||
+      s.fundTagsEdit.open ||
+      s.historyModal.open ||
+      s.actionModal.open ||
+      s.selectHoldingGroupModal.open ||
+      s.addHistoryModal.open
+  );
+
   return (
     <Dialog
       open
       onOpenChange={(open) => {
-        if (!open) setCardDialogRow(null);
+        if (!open && !isAnySubModalOpen) setCardDialogRow(null);
       }}
     >
-      <DialogContent className="sm:max-w-2xl max-h-[88vh] flex flex-col p-0 overflow-hidden">
+      <DialogContent
+        className="sm:max-w-2xl max-h-[88vh] flex flex-col p-0 overflow-hidden"
+        onPointerDownOutside={(e) => {
+          if (isAnySubModalOpen) e.preventDefault();
+        }}
+      >
         <DialogHeader className="flex-shrink-0 flex flex-row items-center justify-between gap-2 space-y-0 px-6 pb-4 pt-6 text-left border-b border-[var(--border)]">
           <DialogTitle className="text-base font-semibold text-[var(--text)]">基金详情</DialogTitle>
         </DialogHeader>
@@ -57,6 +78,7 @@ function FundDetailDialog({ cardDialogRow, getFundCardProps, setCardDialogRow })
 export default function MarketTab({ onAddFund, getFundCardProps, isActive }) {
   const [detailFund, setDetailFund] = useState(null);
   const [detailFundExtra, setDetailFundExtra] = useState(null);
+  const [pageIndex, setPageIndex] = useState(1);
 
   useEffect(() => {
     if (detailFund) {
@@ -118,7 +140,7 @@ export default function MarketTab({ onAddFund, getFundCardProps, isActive }) {
 
   // Query for Valuation Ranking
   const { data: rankingData, isLoading: rankingLoading } = useQuery({
-    queryKey: ['valuationRanking', activeTab],
+    queryKey: ['valuationRanking', activeTab, pageIndex],
     queryFn: async () => {
       let sort = 3;
       let order = 'desc';
@@ -134,7 +156,7 @@ export default function MarketTab({ onAddFund, getFundCardProps, isActive }) {
         order = 'desc';
       }
 
-      const res = await fetchFundValuationRanking(sort, order, 1, 20);
+      const res = await fetchFundValuationRanking(sort, order, pageIndex, 20);
       return res?.Data?.list || [];
     },
     enabled: !!isActive,
@@ -307,177 +329,180 @@ export default function MarketTab({ onAddFund, getFundCardProps, isActive }) {
       ) : (
         <>
           {/* 热门板块 */}
-          <div className="market-section">
-            <div className="market-section-header">
-              <div className="flex items-center gap-2 sm:gap-3">
-                <h2 className="market-section-title whitespace-nowrap flex-shrink-0">热门板块</h2>
-                <ToggleGroup
-                  type="single"
-                  value={sectorFilter}
-                  onValueChange={(v) => v && setSectorFilter(v)}
-                  className="bg-black/5 dark:bg-white/10 p-0.5 rounded-md border border-black/5 dark:border-white/5 gap-0 shadow-inner"
-                >
-                  <ToggleGroupItem
-                    value="industry"
-                    className="h-6 px-2 text-[10px] rounded-sm border-0 bg-transparent text-muted-foreground hover:bg-transparent hover:text-foreground data-[state=on]:bg-background data-[state=on]:text-foreground data-[state=on]:shadow-sm transition-all cursor-pointer"
+          {(sectorsLoading || (sectorEstimates && sectorEstimates.length > 0)) && (
+            <div className="market-section">
+              <div className="market-section-header">
+                <div className="flex items-center gap-2 sm:gap-3">
+                  <h2 className="market-section-title whitespace-nowrap flex-shrink-0">热门板块</h2>
+                  <ToggleGroup
+                    type="single"
+                    value={sectorFilter}
+                    onValueChange={(v) => v && setSectorFilter(v)}
+                    className="bg-black/5 dark:bg-white/10 p-0.5 rounded-md border border-black/5 dark:border-white/5 gap-0 shadow-inner"
                   >
-                    行业
-                  </ToggleGroupItem>
-                  <ToggleGroupItem
-                    value="concept"
-                    className="h-6 px-2 text-[10px] rounded-sm border-0 bg-transparent text-muted-foreground hover:bg-transparent hover:text-foreground data-[state=on]:bg-background data-[state=on]:text-foreground data-[state=on]:shadow-sm transition-all cursor-pointer"
-                  >
-                    概念
-                  </ToggleGroupItem>
-                </ToggleGroup>
-
-                <ToggleGroup
-                  type="single"
-                  value={sectorSort}
-                  onValueChange={(v) => {
-                    if (!v) {
-                      setSectorSortOrder((prev) => (prev === 'desc' ? 'asc' : 'desc'));
-                    } else {
-                      setSectorSort(v);
-                      setSectorSortOrder('desc');
-                    }
-                  }}
-                  className="bg-black/5 dark:bg-white/10 p-0.5 rounded-md border border-black/5 dark:border-white/5 gap-0 shadow-inner"
-                >
-                  <ToggleGroupItem
-                    value="change_pct"
-                    className="h-6 px-2 text-[10px] flex items-center gap-0.5 rounded-sm border-0 bg-transparent text-muted-foreground hover:bg-transparent hover:text-foreground data-[state=on]:bg-background data-[state=on]:text-foreground data-[state=on]:shadow-sm transition-all cursor-pointer"
-                  >
-                    按涨幅
-                    <span
-                      style={{
-                        display: 'inline-flex',
-                        flexDirection: 'column',
-                        lineHeight: 1,
-                        fontSize: '8px',
-                        transform: 'scale(0.8)',
-                        transformOrigin: 'center',
-                        opacity: sectorSort === 'change_pct' ? 1 : 0.3
-                      }}
+                    <ToggleGroupItem
+                      value="industry"
+                      className="h-6 px-2 text-[10px] rounded-sm border-0 bg-transparent text-muted-foreground hover:bg-transparent hover:text-foreground data-[state=on]:bg-background data-[state=on]:text-foreground data-[state=on]:shadow-sm transition-all cursor-pointer"
                     >
-                      <span style={{ opacity: sectorSort === 'change_pct' && sectorSortOrder === 'asc' ? 1 : 0.3 }}>
-                        ▲
-                      </span>
-                      <span style={{ opacity: sectorSort === 'change_pct' && sectorSortOrder === 'desc' ? 1 : 0.3 }}>
-                        ▼
-                      </span>
-                    </span>
-                  </ToggleGroupItem>
-                  <ToggleGroupItem
-                    value="net_inflow"
-                    className="h-6 px-2 text-[10px] flex items-center gap-0.5 rounded-sm border-0 bg-transparent text-muted-foreground hover:bg-transparent hover:text-foreground data-[state=on]:bg-background data-[state=on]:text-foreground data-[state=on]:shadow-sm transition-all cursor-pointer"
-                  >
-                    按资金流入
-                    <span
-                      style={{
-                        display: 'inline-flex',
-                        flexDirection: 'column',
-                        lineHeight: 1,
-                        fontSize: '8px',
-                        transform: 'scale(0.8)',
-                        transformOrigin: 'center',
-                        opacity: sectorSort === 'net_inflow' ? 1 : 0.3
-                      }}
+                      行业
+                    </ToggleGroupItem>
+                    <ToggleGroupItem
+                      value="concept"
+                      className="h-6 px-2 text-[10px] rounded-sm border-0 bg-transparent text-muted-foreground hover:bg-transparent hover:text-foreground data-[state=on]:bg-background data-[state=on]:text-foreground data-[state=on]:shadow-sm transition-all cursor-pointer"
                     >
-                      <span style={{ opacity: sectorSort === 'net_inflow' && sectorSortOrder === 'asc' ? 1 : 0.3 }}>
-                        ▲
-                      </span>
-                      <span style={{ opacity: sectorSort === 'net_inflow' && sectorSortOrder === 'desc' ? 1 : 0.3 }}>
-                        ▼
-                      </span>
-                    </span>
-                  </ToggleGroupItem>
-                </ToggleGroup>
-              </div>
-              <button
-                className="market-section-more"
-                onClick={() =>
-                  useModalStore.setState({
-                    allSectorsModalOpen: true,
-                    allSectorsFilter: sectorFilter,
-                    allSectorsSort: sectorSort,
-                    allSectorsSortOrder: sectorSortOrder
-                  })
-                }
-              >
-                全部 <ChevronRight size={14} />
-              </button>
-            </div>
+                      概念
+                    </ToggleGroupItem>
+                  </ToggleGroup>
 
-            <motion.div layout className="market-sector-grid">
-              <AnimatePresence mode="popLayout">
-                {sectorsLoading
-                  ? Array.from({ length: isMobile ? 4 : 10 }).map((_, i) => (
-                      <motion.div
-                        key={`skeleton-sector-${i}`}
-                        initial={{ opacity: 0, scale: 0.9 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        exit={{ opacity: 0, scale: 0.9 }}
-                        transition={{ type: 'spring', stiffness: 250, damping: 25, mass: 1 }}
-                        className="market-sector-card glass"
+                  <ToggleGroup
+                    type="single"
+                    value={sectorSort}
+                    onValueChange={(v) => {
+                      if (!v) {
+                        setSectorSortOrder((prev) => (prev === 'desc' ? 'asc' : 'desc'));
+                      } else {
+                        setSectorSort(v);
+                        setSectorSortOrder('desc');
+                      }
+                    }}
+                    className="bg-black/5 dark:bg-white/10 p-0.5 rounded-md border border-black/5 dark:border-white/5 gap-0 shadow-inner"
+                  >
+                    <ToggleGroupItem
+                      value="change_pct"
+                      className="h-6 px-2 text-[10px] flex items-center gap-0.5 rounded-sm border-0 bg-transparent text-muted-foreground hover:bg-transparent hover:text-foreground data-[state=on]:bg-background data-[state=on]:text-foreground data-[state=on]:shadow-sm transition-all cursor-pointer"
+                    >
+                      按涨幅
+                      <span
+                        style={{
+                          display: 'inline-flex',
+                          flexDirection: 'column',
+                          lineHeight: 1,
+                          fontSize: '8px',
+                          transform: 'scale(0.8)',
+                          transformOrigin: 'center',
+                          opacity: sectorSort === 'change_pct' ? 1 : 0.3
+                        }}
                       >
-                        <div className="market-sector-main items-center mt-0.5">
-                          <Skeleton className="h-5 w-16" />
-                          <Skeleton className="h-4 w-12" />
-                        </div>
-                        <div className="market-sector-leader flex items-center mt-1 h-[18px]">
-                          <Skeleton className="h-3 w-20" />
-                        </div>
-                      </motion.div>
-                    ))
-                  : filteredAndSortedSectors?.map((sector) => {
-                      const pctStr = sector.change_pct != null ? String(sector.change_pct) : '0.00';
-                      const pctNum = parseFloat(pctStr);
-                      const isUp = pctNum > 0;
-                      const isDown = pctNum < 0;
+                        <span style={{ opacity: sectorSort === 'change_pct' && sectorSortOrder === 'asc' ? 1 : 0.3 }}>
+                          ▲
+                        </span>
+                        <span style={{ opacity: sectorSort === 'change_pct' && sectorSortOrder === 'desc' ? 1 : 0.3 }}>
+                          ▼
+                        </span>
+                      </span>
+                    </ToggleGroupItem>
+                    <ToggleGroupItem
+                      value="net_inflow"
+                      className="h-6 px-2 text-[10px] flex items-center gap-0.5 rounded-sm border-0 bg-transparent text-muted-foreground hover:bg-transparent hover:text-foreground data-[state=on]:bg-background data-[state=on]:text-foreground data-[state=on]:shadow-sm transition-all cursor-pointer"
+                    >
+                      按资金流入
+                      <span
+                        style={{
+                          display: 'inline-flex',
+                          flexDirection: 'column',
+                          lineHeight: 1,
+                          fontSize: '8px',
+                          transform: 'scale(0.8)',
+                          transformOrigin: 'center',
+                          opacity: sectorSort === 'net_inflow' ? 1 : 0.3
+                        }}
+                      >
+                        <span style={{ opacity: sectorSort === 'net_inflow' && sectorSortOrder === 'asc' ? 1 : 0.3 }}>
+                          ▲
+                        </span>
+                        <span style={{ opacity: sectorSort === 'net_inflow' && sectorSortOrder === 'desc' ? 1 : 0.3 }}>
+                          ▼
+                        </span>
+                      </span>
+                    </ToggleGroupItem>
+                  </ToggleGroup>
+                </div>
+                <button
+                  className="market-section-more"
+                  onClick={() =>
+                    useModalStore.setState({
+                      allSectorsModalOpen: true,
+                      allSectorsFilter: sectorFilter,
+                      allSectorsSort: sectorSort,
+                      allSectorsSortOrder: sectorSortOrder
+                    })
+                  }
+                >
+                  全部 <ChevronRight size={14} />
+                </button>
+              </div>
 
-                      return (
+              <motion.div layout className="market-sector-grid">
+                <AnimatePresence mode="popLayout">
+                  {sectorsLoading
+                    ? Array.from({ length: isMobile ? 4 : 10 }).map((_, i) => (
                         <motion.div
-                          layout
+                          key={`skeleton-sector-${i}`}
                           initial={{ opacity: 0, scale: 0.9 }}
                           animate={{ opacity: 1, scale: 1 }}
                           exit={{ opacity: 0, scale: 0.9 }}
                           transition={{ type: 'spring', stiffness: 250, damping: 25, mass: 1 }}
-                          key={sector.id || sector.sector_id}
                           className="market-sector-card glass"
                         >
-                          <div className="market-sector-main">
-                            <span className="market-sector-name">{sector.sector_name}</span>
-                            {sectorSort === 'change_pct' ? (
-                              <span className={cn('market-sector-pct', getColorClass(pctStr))}>
-                                {formatPercent(pctStr)}
-                              </span>
-                            ) : (
-                              <span className={cn('market-sector-pct', getColorClass(sector.net_inflow))}>
-                                {sector.net_inflow ? (sector.net_inflow / 100000000).toFixed(2) + '亿' : '--'}
-                              </span>
-                            )}
+                          <div className="market-sector-main items-center mt-0.5">
+                            <Skeleton className="h-5 w-16" />
+                            <Skeleton className="h-4 w-12" />
                           </div>
-                          <div className="market-sector-leader">
-                            {sectorSort === 'change_pct' ? (
-                              <>
-                                资金流入: {sector.net_inflow ? (sector.net_inflow / 100000000).toFixed(2) + '亿' : '--'}
-                              </>
-                            ) : (
-                              <>
-                                涨跌幅: <span className={getColorClass(pctStr)}>{formatPercent(pctStr)}</span>
-                              </>
-                            )}
+                          <div className="market-sector-leader flex items-center mt-1 h-[18px]">
+                            <Skeleton className="h-3 w-20" />
                           </div>
                         </motion.div>
-                      );
-                    })}
-              </AnimatePresence>
-            </motion.div>
-          </div>
+                      ))
+                    : filteredAndSortedSectors?.map((sector) => {
+                        const pctStr = sector.change_pct != null ? String(sector.change_pct) : '0.00';
+                        const pctNum = parseFloat(pctStr);
+                        const isUp = pctNum > 0;
+                        const isDown = pctNum < 0;
+
+                        return (
+                          <motion.div
+                            layout
+                            initial={{ opacity: 0, scale: 0.9 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            exit={{ opacity: 0, scale: 0.9 }}
+                            transition={{ type: 'spring', stiffness: 250, damping: 25, mass: 1 }}
+                            key={sector.id || sector.sector_id}
+                            className="market-sector-card glass"
+                          >
+                            <div className="market-sector-main">
+                              <span className="market-sector-name">{sector.sector_name}</span>
+                              {sectorSort === 'change_pct' ? (
+                                <span className={cn('market-sector-pct', getColorClass(pctStr))}>
+                                  {formatPercent(pctStr)}
+                                </span>
+                              ) : (
+                                <span className={cn('market-sector-pct', getColorClass(sector.net_inflow))}>
+                                  {sector.net_inflow ? (sector.net_inflow / 100000000).toFixed(2) + '亿' : '--'}
+                                </span>
+                              )}
+                            </div>
+                            <div className="market-sector-leader">
+                              {sectorSort === 'change_pct' ? (
+                                <>
+                                  资金流入:{' '}
+                                  {sector.net_inflow ? (sector.net_inflow / 100000000).toFixed(2) + '亿' : '--'}
+                                </>
+                              ) : (
+                                <>
+                                  涨跌幅: <span className={getColorClass(pctStr)}>{formatPercent(pctStr)}</span>
+                                </>
+                              )}
+                            </div>
+                          </motion.div>
+                        );
+                      })}
+                </AnimatePresence>
+              </motion.div>
+            </div>
+          )}
 
           {/* 榜单栏 */}
-          <div className="market-ranking-section glass">
+          <div className="market-ranking-section glass" id="market-ranking-section">
             <div className="market-ranking-tabs" style={{ padding: '8px 12px' }}>
               <div className="tabs-container">
                 <div className="tabs-scroll-area">
@@ -490,7 +515,10 @@ export default function MarketTab({ onAddFund, getFundCardProps, isActive }) {
                         exit={{ opacity: 0, scale: 0.8 }}
                         key="increase"
                         className={cn('tab', activeTab === 'increase' && 'active')}
-                        onClick={() => setActiveTab('increase')}
+                        onClick={() => {
+                          setActiveTab('increase');
+                          setPageIndex(1);
+                        }}
                         transition={{ type: 'spring', stiffness: 500, damping: 30, mass: 1 }}
                       >
                         估值涨幅
@@ -502,7 +530,10 @@ export default function MarketTab({ onAddFund, getFundCardProps, isActive }) {
                         exit={{ opacity: 0, scale: 0.8 }}
                         key="decrease"
                         className={cn('tab', activeTab === 'decrease' && 'active')}
-                        onClick={() => setActiveTab('decrease')}
+                        onClick={() => {
+                          setActiveTab('decrease');
+                          setPageIndex(1);
+                        }}
                         transition={{ type: 'spring', stiffness: 500, damping: 30, mass: 1 }}
                       >
                         估值跌幅
@@ -514,7 +545,10 @@ export default function MarketTab({ onAddFund, getFundCardProps, isActive }) {
                         exit={{ opacity: 0, scale: 0.8 }}
                         key="hot"
                         className={cn('tab', activeTab === 'hot' && 'active')}
-                        onClick={() => setActiveTab('hot')}
+                        onClick={() => {
+                          setActiveTab('hot');
+                          setPageIndex(1);
+                        }}
                         transition={{ type: 'spring', stiffness: 500, damping: 30, mass: 1 }}
                       >
                         成交热度
@@ -526,7 +560,10 @@ export default function MarketTab({ onAddFund, getFundCardProps, isActive }) {
                         exit={{ opacity: 0, scale: 0.8 }}
                         key="actual"
                         className={cn('tab', activeTab === 'actual' && 'active')}
-                        onClick={() => setActiveTab('actual')}
+                        onClick={() => {
+                          setActiveTab('actual');
+                          setPageIndex(1);
+                        }}
                         transition={{ type: 'spring', stiffness: 500, damping: 30, mass: 1 }}
                       >
                         实际涨幅
@@ -550,10 +587,12 @@ export default function MarketTab({ onAddFund, getFundCardProps, isActive }) {
                   cursor: default;
                   border-bottom: none !important;
                 }
-                .market-ranking-table-row:hover,
-                .market-ranking-table-row.row-even:hover {
-                  --row-bg: var(--table-row-hover-bg);
-                  background-color: var(--table-row-hover-bg) !important;
+                @media (min-width: 640px) {
+                  .market-ranking-table-row:hover,
+                  .market-ranking-table-row.row-even:hover {
+                    --row-bg: var(--table-row-hover-bg);
+                    background-color: var(--table-row-hover-bg) !important;
+                  }
                 }
                 .market-ranking-table-row:nth-child(even),
                 .market-ranking-table-row.row-even {
@@ -693,6 +732,49 @@ export default function MarketTab({ onAddFund, getFundCardProps, isActive }) {
                 ) : (
                   <div className="py-8 text-center text-sm opacity-50">暂无数据</div>
                 )}
+              </div>
+
+              <div className="py-5 flex justify-end border-t border-[var(--border)] pr-4">
+                <Pagination className="justify-end w-auto mx-0">
+                  <PaginationContent>
+                    {[1, 2, 3, 4, 5].map((p) => (
+                      <PaginationItem key={p}>
+                        <PaginationLink
+                          onClick={(e) => {
+                            e.preventDefault();
+                            if (pageIndex !== p) {
+                              setPageIndex(p);
+                              // 延迟一点等待数据请求开始，同时滚动到表头
+                              setTimeout(() => {
+                                const el = document.getElementById('market-ranking-section');
+                                if (el) {
+                                  // 动态获取固定导航栏的高度，如果找不到则降级使用默认值 68px
+                                  const navbar = document.querySelector('.navbar');
+                                  const navHeight = navbar ? navbar.getBoundingClientRect().height : 68;
+
+                                  // 动态获取大盘指数组件的高度
+                                  const indexAccordion = document.querySelector('.market-index-accordion-root');
+                                  const indexHeight = indexAccordion
+                                    ? indexAccordion.getBoundingClientRect().height
+                                    : 0;
+
+                                  // 精准偏移：导航栏高度 + 指数组件高度 + 16px 的视觉留白
+                                  const offset = navHeight + indexHeight + 16;
+
+                                  const y = el.getBoundingClientRect().top + window.scrollY - offset;
+                                  window.scrollTo({ top: y, behavior: 'smooth' });
+                                }
+                              }, 10);
+                            }
+                          }}
+                          isActive={pageIndex === p}
+                        >
+                          {p}
+                        </PaginationLink>
+                      </PaginationItem>
+                    ))}
+                  </PaginationContent>
+                </Pagination>
               </div>
             </div>
           </div>

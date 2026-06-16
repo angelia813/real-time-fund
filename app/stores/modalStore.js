@@ -24,6 +24,50 @@ const DEFAULTS = {
   successModal: { open: false, message: '' }
 };
 
+const getClosedModalState = () => ({
+  settingsOpen: false,
+  feedbackOpen: false,
+  weChatOpen: false,
+  donateOpen: false,
+  loginModalOpen: false,
+  loginInitialError: '',
+  tutorialDrawerOpen: false,
+  updateLogOpen: false,
+  isUpdateModalOpen: false,
+  isLogoutConfirmOpen: false,
+  mobileTableSettingModalOpen: false,
+  mobileFundDrawerOpen: false,
+  portfolioEarningsOpen: false,
+  sortSettingOpen: false,
+  allSectorsModalOpen: false,
+  groupModalOpen: false,
+  groupManageOpen: false,
+  addFundToGroupOpen: false,
+  holdingModal: { ...DEFAULTS.holdingModal },
+  actionModal: { ...DEFAULTS.actionModal },
+  tradeModal: { ...DEFAULTS.tradeModal },
+  convertModal: { ...DEFAULTS.convertModal },
+  dividendMethodModal: { ...DEFAULTS.dividendMethodModal },
+  selectFundSingleModal: { ...DEFAULTS.selectFundSingleModal },
+  selectHoldingGroupModal: { ...DEFAULTS.selectHoldingGroupModal },
+  dataSourceModal: { ...DEFAULTS.dataSourceModal },
+  dcaModal: { ...DEFAULTS.dcaModal },
+  historyModal: { ...DEFAULTS.historyModal },
+  addHistoryModal: { ...DEFAULTS.addHistoryModal },
+  fundTagsEdit: { ...DEFAULTS.fundTagsEdit },
+  clearConfirm: null,
+  fundDeleteConfirm: null,
+  fundDeleteBulkConfirm: null,
+  holdingMigrateDialog: { ...DEFAULTS.holdingMigrateDialog },
+  cloudConfigModal: { ...DEFAULTS.cloudConfigModal },
+  deviceConflictModal: { ...DEFAULTS.deviceConflictModal },
+  successModal: { ...DEFAULTS.successModal },
+  scanModalOpen: false,
+  scanConfirmModalOpen: false,
+  isScanning: false,
+  isScanImporting: false
+});
+
 export const useModalStore = create((set, get) => ({
   // ---- Simple boolean modals ----
   settingsOpen: false,
@@ -81,6 +125,7 @@ export const useModalStore = create((set, get) => ({
   scanConfirmModalOpen: false,
   isScanning: false,
   isScanImporting: false,
+  modalErrorResetKey: 0,
 
   // ---- Actions ----
 
@@ -93,6 +138,13 @@ export const useModalStore = create((set, get) => ({
       set({ [name]: false });
     }
   },
+
+  /** Close all modal/drawer/dialog state after a render-time crash. */
+  closeAllModals: () =>
+    set((state) => ({
+      ...getClosedModalState(),
+      modalErrorResetKey: state.modalErrorResetKey + 1
+    })),
 
   /**
    * Central modal router: closes actionModal, opens target modal.
@@ -154,48 +206,3 @@ export const useModalStore = create((set, get) => ({
 
 // ---- Non-React accessor for use in callbacks ----
 export const getModalState = () => useModalStore.getState();
-
-// ---- isAnyModalOpen selector ----
-const selectIsAnyModalOpen = (s) =>
-  s.settingsOpen ||
-  s.feedbackOpen ||
-  s.weChatOpen ||
-  s.donateOpen ||
-  s.loginModalOpen ||
-  s.tutorialDrawerOpen ||
-  s.updateLogOpen ||
-  s.isUpdateModalOpen ||
-  s.isLogoutConfirmOpen ||
-  s.mobileTableSettingModalOpen ||
-  s.mobileFundDrawerOpen ||
-  s.portfolioEarningsOpen ||
-  s.sortSettingOpen ||
-  s.allSectorsModalOpen ||
-  s.groupModalOpen ||
-  s.groupManageOpen ||
-  s.addFundToGroupOpen ||
-  s.holdingModal.open ||
-  s.actionModal.open ||
-  s.tradeModal.open ||
-  s.convertModal.open ||
-  s.dividendMethodModal.open ||
-  s.selectFundSingleModal.open ||
-  s.selectHoldingGroupModal.open ||
-  s.dataSourceModal.open ||
-  s.dcaModal.open ||
-  s.historyModal.open ||
-  s.addHistoryModal.open ||
-  s.fundTagsEdit.open ||
-  s.holdingMigrateDialog.open ||
-  s.cloudConfigModal.open ||
-  s.deviceConflictModal.open ||
-  s.successModal.open ||
-  !!s.clearConfirm ||
-  !!s.fundDeleteConfirm ||
-  !!s.fundDeleteBulkConfirm ||
-  s.scanModalOpen ||
-  s.scanConfirmModalOpen ||
-  s.isScanning ||
-  s.isScanImporting;
-
-export const useIsAnyModalOpen = () => useModalStore(selectIsAnyModalOpen);
