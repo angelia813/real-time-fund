@@ -7,6 +7,7 @@ import SummaryTabContent from './components/SummaryTabContent';
 import FundListView from './components/FundListView';
 import NavLayout from './components/NavLayout';
 import { motion, AnimatePresence } from 'framer-motion';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import Image from 'next/image';
 
 import { createAvatar } from '@dicebear/core';
@@ -99,7 +100,6 @@ import {
   sanitizeTagRowForStorage,
   serializeTagRecordsForCompare,
   cloneHoldingDeep,
-  seedGroupHoldingsFromGlobal,
   migrateDcaPlansToScoped,
   isNavUpdated
 } from './lib/fundHelpers';
@@ -306,6 +306,7 @@ export default function HomePage() {
   const [todayPercentModes, setTodayPercentModes] = useState({}); // { [code]: boolean }
 
   const tabsRef = useRef(null);
+  const scrollAreaRef = useRef(null);
 
   // ---- Modal store setter compatibility wrappers ----
   const _ms = useModalStore.setState;
@@ -1423,12 +1424,12 @@ export default function HomePage() {
 
   // 自动滚动选中 Tab 到可视区域
   useEffect(() => {
-    if (!tabsRef.current) return;
+    if (!scrollAreaRef.current) return;
     if (currentTab === 'all' || currentTab === SUMMARY_TAB_ID) {
-      tabsRef.current.scrollTo({ left: 0, behavior: 'smooth' });
+      scrollAreaRef.current.scrollTo({ left: 0, behavior: 'smooth' });
       return;
     }
-    const activeTab = tabsRef.current.querySelector('.tab.active');
+    const activeTab = tabsRef.current?.querySelector('.tab.active');
     if (activeTab) {
       activeTab.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
     }
@@ -1438,6 +1439,7 @@ export default function HomePage() {
   const dragStateRef = useRef({ isDragging: false, startX: 0, startY: 0, hasDragged: false });
   const [canLeft, setCanLeft] = useState(false);
   const [canRight, setCanRight] = useState(false);
+  const [hasTabOverflow, setHasTabOverflow] = useState(false);
 
   const handleSaveHolding = (code, data, groupIdOverride) => {
     const gid = getScopedGroupId(
@@ -1938,7 +1940,7 @@ export default function HomePage() {
   };
 
   const handleMouseDown = (e) => {
-    if (!tabsRef.current) return;
+    if (!scrollAreaRef.current) return;
     dragStateRef.current = { isDragging: true, startX: e.clientX, startY: e.clientY, hasDragged: false };
   };
 
@@ -1948,19 +1950,29 @@ export default function HomePage() {
 
   const handleMouseMove = (e) => {
     const ds = dragStateRef.current;
-    if (!ds.isDragging || !tabsRef.current) return;
+    if (!ds.isDragging || !scrollAreaRef.current) return;
     const dx = e.clientX - ds.startX;
     const dy = e.clientY - ds.startY;
     if (!ds.hasDragged && Math.abs(dx) < 5 && Math.abs(dy) < 5) return;
     ds.hasDragged = true;
     e.preventDefault();
-    tabsRef.current.scrollLeft -= e.movementX;
+    scrollAreaRef.current.scrollLeft -= e.movementX;
   };
 
   const handleWheel = (e) => {
-    if (!tabsRef.current) return;
+    if (!scrollAreaRef.current) return;
     const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
-    tabsRef.current.scrollLeft += delta;
+    scrollAreaRef.current.scrollLeft += delta;
+  };
+
+  const scrollTabsLeftBtn = () => {
+    if (!scrollAreaRef.current) return;
+    scrollAreaRef.current.scrollBy({ left: -200, behavior: 'smooth' });
+  };
+
+  const scrollTabsRightBtn = () => {
+    if (!scrollAreaRef.current) return;
+    scrollAreaRef.current.scrollBy({ left: 200, behavior: 'smooth' });
   };
 
   const handleTabClick = (tabId) => {
@@ -1969,10 +1981,12 @@ export default function HomePage() {
   };
 
   const updateTabOverflow = () => {
-    if (!tabsRef.current) return;
-    const el = tabsRef.current;
-    setCanLeft(el.scrollLeft > 0);
-    setCanRight(el.scrollLeft < el.scrollWidth - el.clientWidth - 1);
+    const area = scrollAreaRef.current;
+    if (!area) return;
+    const overflowing = area.scrollWidth > area.clientWidth + 1;
+    setHasTabOverflow(overflowing);
+    setCanLeft(area.scrollLeft > 0);
+    setCanRight(area.scrollLeft < area.scrollWidth - area.clientWidth - 1);
   };
 
   useEffect(() => {
@@ -1986,9 +2000,31 @@ export default function HomePage() {
       });
     };
     window.addEventListener('resize', onResize);
+
+    // 额外监听 tabs 容器及内容的尺寸变化（如字体加载、动画结束等）
+    let resizeObserver = null;
+    let mutationObserver = null;
+    const area = scrollAreaRef.current;
+
+    if (area) {
+      resizeObserver = new ResizeObserver(onResize);
+      resizeObserver.observe(area);
+
+      // 监听内部 DOM 的增删或 style 变化（framer-motion 动画会不断改变 style）
+      mutationObserver = new MutationObserver(onResize);
+      mutationObserver.observe(area, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['style', 'class']
+      });
+    }
+
     return () => {
       window.removeEventListener('resize', onResize);
       if (rafId) cancelAnimationFrame(rafId);
+      if (resizeObserver) resizeObserver.disconnect();
+      if (mutationObserver) mutationObserver.disconnect();
     };
   }, [groups, funds.length, favorites.size]);
 
@@ -2038,7 +2074,8 @@ export default function HomePage() {
     setValuationSeries,
     showToast,
     normalizeCode,
-    dedupeByCode
+    dedupeByCode,
+    setFundTagRecords
   });
 
   const refreshAllRef = useRef(null);
@@ -2672,10 +2709,6 @@ export default function HomePage() {
           setCurrentTab('all');
         }
         // 加载持仓数据
-        const seedGh = seedGroupHoldingsFromGlobal(holdings, isArray(groups) ? groups : [], groupHoldings);
-        if (seedGh.changed) {
-          setGroupHoldings(seedGh.next);
-        }
         const migratedDca = migrateDcaPlansToScoped(isPlainObject(dcaPlans) ? dcaPlans : {});
         if (JSON.stringify(migratedDca) !== JSON.stringify(dcaPlans)) {
           setDcaPlans(migratedDca);
@@ -2700,16 +2733,6 @@ export default function HomePage() {
     if (!hasLocalTabInitRef.current) return;
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, [currentTab]);
-
-  // 全局持仓或分组成员变化时，按分组幂等补全子账本（不覆盖已有分组持仓）
-  useEffect(() => {
-    if (!hasLocalTabInitRef.current) return;
-    setGroupHoldings((prev) => {
-      const { next, changed } = seedGroupHoldingsFromGlobal(holdings, groups, prev);
-      if (!changed) return prev;
-      return next;
-    });
-  }, [holdings, groups]);
 
   // 记录用户当前选择的分组（仅本地存储，不同步云端）
   useEffect(() => {
@@ -3350,24 +3373,6 @@ export default function HomePage() {
       return next;
     });
 
-    // 同步删除该基金的每日收益数据
-    try {
-      setFundDailyEarnings((prev) => {
-        if (!isPlainObject(prev)) return prev;
-        let changed = false;
-        const next = { ...prev };
-        Object.keys(next).forEach((scopeKey) => {
-          const bucket = next[scopeKey];
-          if (!isPlainObject(bucket) || !(removeCode in bucket)) return;
-          const nb = { ...bucket };
-          delete nb[removeCode];
-          next[scopeKey] = nb;
-          changed = true;
-        });
-        return changed ? next : prev;
-      });
-    } catch {}
-
     // 同步删除该基金的定投计划（所有 scope）
     setDcaPlans((prev) => {
       const scoped = migrateDcaPlansToScoped(prev);
@@ -3622,7 +3627,8 @@ export default function HomePage() {
     showMarketIndexOverride,
     showGroupFundSearchOverride,
     isMobileOverride,
-    dynamicStyleOverride
+    dynamicStyleOverride,
+    containerWidthOverride
   ) => {
     e?.preventDefault?.();
     const seconds = secondsOverride ?? tempSeconds;
@@ -3656,14 +3662,14 @@ export default function HomePage() {
     else setDynamicStylePc(nextDynamicStyle);
 
     // 在移动端不裁剪也不修改 pcContainerWidth，直接保留原值
-    let w = Number(containerWidth) || 1200;
+    let w = Number(containerWidthOverride ?? containerWidth) || 1200;
     if (!targetIsMobile) {
-      w = Math.min(window.innerWidth, Math.max(600, w));
+      w = Math.min(Math.max(window.innerWidth, 2000), Math.max(600, w));
       setContainerWidth(w);
     }
 
     try {
-      const parsed = customSettings || {};
+      const parsed = useStorageStore.getState().customSettings || {};
       if (targetIsMobile) {
         // 仅更新当前运行端对应的开关键，不覆盖 PC 端宽度
         setCustomSettings({
@@ -3688,7 +3694,7 @@ export default function HomePage() {
   const handleResetContainerWidth = () => {
     setContainerWidth(1200);
     try {
-      const parsed = customSettings || {};
+      const parsed = useStorageStore.getState().customSettings || {};
       setCustomSettings({ ...parsed, pcContainerWidth: 1200 });
     } catch {}
   };
@@ -3951,7 +3957,9 @@ export default function HomePage() {
               }
             }
             if (isNumber(mergedSettings.pcContainerWidth) && Number.isFinite(mergedSettings.pcContainerWidth)) {
-              const maxWidth = window.matchMedia('(max-width: 640px)').matches ? 99999 : window.innerWidth;
+              const maxWidth = window.matchMedia('(max-width: 640px)').matches
+                ? 99999
+                : Math.max(window.innerWidth, 2000);
               setContainerWidth(Math.min(maxWidth, Math.max(600, mergedSettings.pcContainerWidth)));
             }
             if (isBoolean(mergedSettings.showMarketIndexPc)) setShowMarketIndexPc(mergedSettings.showMarketIndexPc);
@@ -4174,7 +4182,7 @@ export default function HomePage() {
   }, []);
 
   const handleDataSourceSelect = useCallback(
-    (fundCode, sourceId) => {
+    (fundCode, sourceId, autoSource) => {
       setFunds((prev) => {
         const next = [...prev];
         const idx = next.findIndex((f) => f.code === fundCode);
@@ -4182,6 +4190,7 @@ export default function HomePage() {
           next[idx] = {
             ...next[idx],
             dataSource: sourceId,
+            autoSource: !!autoSource,
             gsz: null,
             gszzl: null,
             gztime: null,
@@ -4350,7 +4359,7 @@ export default function HomePage() {
     handleRetryOcr: () => handleRetryOcr?.(),
     handleFilesDrop: (e) => handleFilesDrop?.(e),
     toggleScannedCode: (code) => toggleScannedCode?.(code),
-    confirmScanImport: (targetGroupId, expandAfterAdd) => confirmScanImport?.(targetGroupId, expandAfterAdd),
+    confirmScanImport: (...args) => confirmScanImport?.(...args),
     // 辅助函数
     getScopedHolding: (code, groupIdOverride) => getScopedHolding?.(code, groupIdOverride),
     getScopedGroupId: (groupIdOverride) => getScopedGroupId?.(groupIdOverride),
@@ -4638,10 +4647,54 @@ export default function HomePage() {
                   }}
                 >
                   <div className="tabs-container">
-                    <div className="tabs-scroll-area" data-mask-left={canLeft} data-mask-right={canRight}>
+                    <div
+                      className="tabs-scroll-wrapper"
+                      style={{
+                        position: 'relative',
+                        flex: 1,
+                        minWidth: 0,
+                        paddingLeft: !isMobile && hasTabOverflow ? 32 : 0,
+                        paddingRight: !isMobile && hasTabOverflow ? 32 : 0,
+                        transition: 'padding 0.2s ease'
+                      }}
+                    >
+                      <AnimatePresence>
+                        {!isMobile && hasTabOverflow && (
+                          <>
+                            <motion.button
+                              initial={{ opacity: 0, scale: 0.8, y: '-50%', x: 0 }}
+                              animate={{ opacity: 1, scale: 1, y: '-50%', x: 0 }}
+                              exit={{ opacity: 0, scale: 0.8, y: '-50%', x: 0 }}
+                              whileHover={canLeft ? { scale: 1.1, y: '-50%', x: 0 } : {}}
+                              whileTap={canLeft ? { scale: 0.95, y: '-50%', x: 0 } : {}}
+                              transition={{ duration: 0.15 }}
+                              className={`tabs-scroll-btn left ${!canLeft ? 'opacity-30 cursor-not-allowed' : ''}`}
+                              disabled={!canLeft}
+                              onClick={scrollTabsLeftBtn}
+                            >
+                              <ChevronLeft size={16} />
+                            </motion.button>
+                            <motion.button
+                              initial={{ opacity: 0, scale: 0.8, y: '-50%', x: 0 }}
+                              animate={{ opacity: 1, scale: 1, y: '-50%', x: 0 }}
+                              exit={{ opacity: 0, scale: 0.8, y: '-50%', x: 0 }}
+                              whileHover={canRight ? { scale: 1.1, y: '-50%', x: 0 } : {}}
+                              whileTap={canRight ? { scale: 0.95, y: '-50%', x: 0 } : {}}
+                              transition={{ duration: 0.15 }}
+                              className={`tabs-scroll-btn right ${!canRight ? 'opacity-30 cursor-not-allowed' : ''}`}
+                              disabled={!canRight}
+                              onClick={scrollTabsRightBtn}
+                            >
+                              <ChevronRight size={16} />
+                            </motion.button>
+                          </>
+                        )}
+                      </AnimatePresence>
                       <div
-                        className="tabs"
-                        ref={tabsRef}
+                        className="tabs-scroll-area"
+                        ref={scrollAreaRef}
+                        data-mask-left={canLeft}
+                        data-mask-right={canRight}
                         onMouseDown={handleMouseDown}
                         onMouseLeave={handleMouseLeaveOrUp}
                         onMouseUp={handleMouseLeaveOrUp}
@@ -4649,70 +4702,72 @@ export default function HomePage() {
                         onWheel={handleWheel}
                         onScroll={updateTabOverflow}
                       >
-                        <AnimatePresence mode="popLayout">
-                          {showPortfolioSummaryTab && (
+                        <div className="tabs" ref={tabsRef}>
+                          <AnimatePresence mode="popLayout">
+                            {showPortfolioSummaryTab && (
+                              <motion.button
+                                layout
+                                initial={{ opacity: 0, scale: 0.8 }}
+                                animate={{ opacity: 1, scale: 1 }}
+                                exit={{ opacity: 0, scale: 0.8 }}
+                                key="portfolio-summary"
+                                className={`tab ${currentTab === SUMMARY_TAB_ID ? 'active' : ''}`}
+                                onClick={() => handleTabClick(SUMMARY_TAB_ID)}
+                                transition={{ type: 'spring', stiffness: 500, damping: 30, mass: 1 }}
+                              >
+                                汇总
+                              </motion.button>
+                            )}
                             <motion.button
                               layout
                               initial={{ opacity: 0, scale: 0.8 }}
                               animate={{ opacity: 1, scale: 1 }}
                               exit={{ opacity: 0, scale: 0.8 }}
-                              key="portfolio-summary"
-                              className={`tab ${currentTab === SUMMARY_TAB_ID ? 'active' : ''}`}
-                              onClick={() => handleTabClick(SUMMARY_TAB_ID)}
+                              key="all"
+                              className={`tab ${currentTab === 'all' ? 'active' : ''}`}
+                              onClick={() => handleTabClick('all')}
                               transition={{ type: 'spring', stiffness: 500, damping: 30, mass: 1 }}
                             >
-                              汇总
+                              全部 ({funds.length})
                             </motion.button>
-                          )}
-                          <motion.button
-                            layout
-                            initial={{ opacity: 0, scale: 0.8 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            exit={{ opacity: 0, scale: 0.8 }}
-                            key="all"
-                            className={`tab ${currentTab === 'all' ? 'active' : ''}`}
-                            onClick={() => handleTabClick('all')}
-                            transition={{ type: 'spring', stiffness: 500, damping: 30, mass: 1 }}
-                          >
-                            全部 ({funds.length})
-                          </motion.button>
-                          <motion.button
-                            layout
-                            initial={{ opacity: 0, scale: 0.8 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            exit={{ opacity: 0, scale: 0.8 }}
-                            key="fav"
-                            className={`tab ${currentTab === 'fav' ? 'active' : ''}`}
-                            onClick={() => handleTabClick('fav')}
-                            transition={{ type: 'spring', stiffness: 500, damping: 30, mass: 1 }}
-                          >
-                            自选 ({favorites.size})
-                          </motion.button>
-                          {groups.map((g) => (
                             <motion.button
                               layout
                               initial={{ opacity: 0, scale: 0.8 }}
                               animate={{ opacity: 1, scale: 1 }}
                               exit={{ opacity: 0, scale: 0.8 }}
-                              key={g.id}
-                              className={`tab ${currentTab === g.id ? 'active' : ''}`}
-                              onClick={() => handleTabClick(g.id)}
+                              key="fav"
+                              className={`tab ${currentTab === 'fav' ? 'active' : ''}`}
+                              onClick={() => handleTabClick('fav')}
                               transition={{ type: 'spring', stiffness: 500, damping: 30, mass: 1 }}
                             >
-                              {g.name} ({g.codes.length})
+                              自选 ({favorites.size})
                             </motion.button>
-                          ))}
-                        </AnimatePresence>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <button className="icon-button add-group-btn" onClick={() => setGroupModalOpen(true)}>
-                              <PlusIcon width="16" height="16" />
-                            </button>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            <p>新增分组</p>
-                          </TooltipContent>
-                        </Tooltip>
+                            {groups.map((g) => (
+                              <motion.button
+                                layout
+                                initial={{ opacity: 0, scale: 0.8 }}
+                                animate={{ opacity: 1, scale: 1 }}
+                                exit={{ opacity: 0, scale: 0.8 }}
+                                key={g.id}
+                                className={`tab ${currentTab === g.id ? 'active' : ''}`}
+                                onClick={() => handleTabClick(g.id)}
+                                transition={{ type: 'spring', stiffness: 500, damping: 30, mass: 1 }}
+                              >
+                                {g.name} ({g.codes.length})
+                              </motion.button>
+                            ))}
+                          </AnimatePresence>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <button className="icon-button add-group-btn" onClick={() => setGroupModalOpen(true)}>
+                                <PlusIcon width="16" height="16" />
+                              </button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p>新增分组</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </div>
                       </div>
                     </div>
                     {groups.length > 0 && (
